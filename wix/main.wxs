@@ -33,7 +33,7 @@
 
     <Product
         Id='*'
-        Name='firefox_profile_switcher_connector'
+        Name='Profile Switcher for Firefox Connector'
         UpgradeCode='034020BB-1402-4F21-8EB0-E593085C3407'
         Manufacturer='nulldev'
         Language='1033'
@@ -69,37 +69,37 @@
                       2. Comment out or remove the `ComponentRef` tag with the "License" Id
                          attribute value further down in this file.
                     -->
-                    <Component Id='License' Guid='*' Win64='$(var.Win64)'>
+                    <Component Id='License' Guid='68A659B8-B6FE-4807-A0BA-6999A298E268' Win64='$(var.Win64)'>
+                        <RemoveFolder Id='RemoveApplicationFolder' Directory='APPLICATIONFOLDER' On="uninstall" />
+                        <RegistryKey Root="HKCU" Key="SOFTWARE\nulldev\FirefoxProfileSwitcher">
+                            <RegistryValue Name="LicenseInstalled" Value="1" KeyPath="yes" Type="integer" />
+                        </RegistryKey>
                         <File Id='LicenseFile'
                             Name='LICENSE.txt'
                             DiskId='1'
-                            Source='LICENSE.txt'
-                            KeyPath='yes'/>
+                            Source='LICENSE.txt' />
                     </Component>
                     
-                    <Directory Id='Bin' Name='bin'>
-                        <Component Id="RegistryEntries" Guid="F9A841D7-6439-433D-A75F-6D6BAEEC4778">
+                    <Directory Id='ConnectorDir' Name='native-connector'>
+                        <Component Id='native_connector' Guid='6D4A2669-D7CD-4B03-BE8B-E8AD51D48BC8' Win64='$(var.Win64)'>
+                            <RemoveFolder Id='RemoveConnectorDir' Directory='ConnectorDir' On="uninstall" />
                             <RegistryKey Root="HKCU"
-                                         Key="SOFTWARE\Mozilla\NativeMessagingHosts\ax.nd.profile_switcher_ff"
-                                  Action="createAndRemoveOnUninstall">
-                                <RegistryValue Type="string" Value="[#firefox_manifest0]" KeyPath="yes"/>
+                                         Key="SOFTWARE\Mozilla\NativeMessagingHosts\ax.nd.profile_switcher_ff">
+                                <RegistryValue Type="string" Value="[#firefox_manifest]" />
                             </RegistryKey>
-                        </Component>
-                        <Component Id='firefox_manifest' Guid='5D0F3C6A-0C4F-4C5A-8F3B-ADC31D3F4A1A' Win64='$(var.Win64)' KeyPath='yes'>
+                            <RegistryKey Root="HKCU" Key="SOFTWARE\nulldev\FirefoxProfileSwitcher">
+                                <RegistryValue Name="ConnectorInstalled" Value="1" Type="integer" KeyPath="yes" />
+                            </RegistryKey>
                             <File
-                                Id='firefox_manifest0'
-                                Name='native-manifest.json'
+                                Id='firefox_manifest'
+                                Name='firefox-manifest.json'
                                 DiskId='1'
-                                Source='manifest/manifest-windows.json'
-                                KeyPath='yes'/>
-                        </Component>
-                        <Component Id='binary0' Guid='5D0F3C6A-0C4F-4C5A-8F3B-ADC31D3F4A1A' Win64='$(var.Win64)'>
+                                Source='manifest/manifest-windows.json' />
                             <File
-                                Id='exe0'
+                                Id='native_connector_exe'
                                 Name='firefox-profile-switcher-connector.exe'
                                 DiskId='1'
-                                Source='target\$(var.Profile)\firefox_profile_switcher_connector.exe'
-                                KeyPath='yes'/>
+                                Source='target\$(var.Profile)\firefox_profile_switcher_connector.exe' />
                         </Component>
                     </Directory>
                 </Directory>
@@ -108,8 +108,8 @@
 
         <Feature
             Id='Binaries'
-            Title='Application'
-            Description='Installs all binaries and the license.'
+            Title='Extension Connector'
+            Description='Installs the connector required by Profile Switcher for Firefox.'
             Level='1'
             ConfigurableDirectory='APPLICATIONFOLDER'
             AllowAdvertise='no'
@@ -121,11 +121,11 @@
             -->
             <ComponentRef Id='License'/>
             
-            <ComponentRef Id='binary0'/>
-            <ComponentRef Id='firefox_manifest'/>
+            <ComponentRef Id='native_connector'/>
         </Feature>
 
         <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
+        <Property Id="WIXUI_INSTALLDIR" Value="APPLICATIONFOLDER" />
 
         
         <!--
@@ -150,8 +150,9 @@
         <!--<Property Id='ARPHELPLINK' Value='ChangeMe'/>-->
 
         <UI>
-            <UIRef Id='WixUI_FeatureTree'/>
-            
+<!--             <UIRef Id='WixUI_FeatureTree'/> -->
+            <UIRef Id="WixUI_InstallDir" />
+
             <!--
               Enabling the EULA dialog in the installer is a three step process:
 
@@ -162,8 +163,10 @@
                    the path to a RTF file that will be used as the EULA and
                    displayed in the license agreement dialog.
             -->
-            <Publish Dialog='WelcomeDlg' Control='Next' Event='NewDialog' Value='CustomizeDlg' Order='99'>1</Publish>
-            <Publish Dialog='CustomizeDlg' Control='Back' Event='NewDialog' Value='WelcomeDlg' Order='99'>1</Publish>
+            <Publish Dialog='WelcomeDlg' Control='Next' Event='NewDialog' Value='InstallDirDlg' Order='99'>1</Publish>
+            <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="99"> 1 </Publish>
+<!--             <Publish Dialog='WelcomeDlg' Control='Next' Event='NewDialog' Value='CustomizeDlg' Order='99'>1</Publish> -->
+<!--             <Publish Dialog='CustomizeDlg' Control='Back' Event='NewDialog' Value='WelcomeDlg' Order='99'>1</Publish> -->
 
         </UI>
 

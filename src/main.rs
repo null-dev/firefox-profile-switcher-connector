@@ -8,7 +8,6 @@ extern crate cfg_if;
 extern crate ring;
 extern crate data_encoding;
 extern crate ulid;
-extern crate nix;
 extern crate libc;
 extern crate interprocess;
 extern crate fern;
@@ -31,8 +30,6 @@ use ring::digest::{Context, SHA256};
 use data_encoding::{HEXUPPER};
 use std::process::{Command, Child, exit, Stdio};
 use ulid::Ulid;
-use nix::unistd::ForkResult;
-use nix::sys::wait::waitpid;
 use interprocess::local_socket::{LocalSocketListener, ToLocalSocketName, LocalSocketStream};
 use std::sync::Mutex;
 use std::iter::Map;
@@ -41,6 +38,20 @@ use serde_json::Value;
 use std::ops::Add;
 use crate::GetParentProcError::NoCrashReporterEnvVar;
 use std::env::VarError;
+
+cfg_if! {
+    if #[cfg(target_family = "unix")] {
+        extern crate nix;
+
+        use nix::unistd::ForkResult;
+        use nix::sys::wait::waitpid;
+    } else if #[cfg(target_family = "windows")] {
+    } else {
+        compile_error!("Unknown OS!");
+    }
+}
+
+const APP_VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 // === NATIVE REQUEST ===
 #[derive(Serialize, Deserialize)]
@@ -191,7 +202,8 @@ enum NativeResponseData {
 enum NativeResponseEvent {
     ProfileList { current_profile_id: String, profiles: Vec<NativeResponseProfileListProfileEntry> },
     FocusWindow,
-    CloseManager
+    CloseManager,
+    ConnectorInformation { version: String }
 }
 
 fn write_native_response(resp: NativeResponseWrapper) {
@@ -208,20 +220,46 @@ fn write_native_response(resp: NativeResponseWrapper) {
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
-    browser_profile_dir: String
+    browser_profile_dir: PathBuf
 }
 
 impl Config {
     fn profiles_ini_path(&self) -> PathBuf {
-        return [self.browser_profile_dir.as_str(), "profiles.ini"].iter().collect();
+        let mut profiles_ini = self.browser_profile_dir.clone();
+        profiles_ini.push("profiles.ini");
+        return profiles_ini;
     }
+}
+
+fn get_default_browser_profile_folder() -> PathBuf {
+    let user_dirs = directories::UserDirs::new()
+        .expect("Unable to determine user folder!");
+
+    let mut result = user_dirs.home_dir().to_path_buf();
+    cfg_if! {
+        if #[cfg(target_os = "linux")] {
+            result.push(".mozilla");
+            result.push("firefox");
+        } else if #[cfg(target_os = "macos")] {
+            result.push("Library");
+            result.push("Application Support");
+            result.push("Firefox");
+        } else if #[cfg(target_os = "windows")] {
+            result.push("AppData");
+            result.push("Roaming");
+            result.push("Mozilla");
+            result.push("Firefox");
+        } else {
+            compile_error!("Unknown OS!");
+        }
+    }
+    return result;
 }
 
 impl Default for Config {
     fn default() -> Self {
-        // TODO Detect from platform
         Config {
-            browser_profile_dir: String::from("/home/nulldev/.mozilla/firefox")
+            browser_profile_dir: get_default_browser_profile_folder()
         }
     }
 }
@@ -260,7 +298,9 @@ struct ProfileEntry {
 impl ProfileEntry {
     fn full_path(&self, config: &Config) -> PathBuf {
         return if self.is_relative {
-            [&config.browser_profile_dir, &self.path].iter().collect()
+            let mut result = config.browser_profile_dir.clone();
+            result.push(&self.path);
+            result
         } else {
             PathBuf::from(&self.path)
         }
@@ -419,13 +459,13 @@ fn get_ipc_socket_name(profile_id: &str, reset: bool) -> io::Result<impl ToLocal
     cfg_if! {
         if #[cfg(target_family = "unix")] {
             // TODO Somehow delete unix socket afterwards? IDK, could break everything if new instance starts before we delete socket
-            let path: PathBuf = ["/tmp", ("fps-profile-".to_owned() + profile_id).as_str()].iter().collect();
+            let path: PathBuf = ["/tmp", ("fps-profile_".to_owned() + profile_id).as_str()].iter().collect();
             if reset {
                 fs::remove_file(&path); // Delete old socket
             }
             return Ok(path);
         } else if #[cfg(target_family = "windows")] {
-            return "@ff-profile-switcher-profile_".to_owned() + profile_id;
+            return Ok("@fps-profile_".to_owned() + profile_id);
         } else {
             compile_error!("Unknown OS!");
         }
@@ -599,6 +639,14 @@ fn main() {
                 .expect("Failed to write input to debug input file!");
         }
     }
+
+    // Notify extension of our version
+    write_native_response(NativeResponseWrapper {
+        id: NATIVE_RESP_ID_EVENT,
+        resp: NativeResponse::event(NativeResponseEvent::ConnectorInformation {
+            version: APP_VERSION.to_string()
+        })
+    });
 
     // Calculate storage dirs
     let project_dirs = ProjectDirs::from("ax.nd",
@@ -871,7 +919,7 @@ fn process_cmd_create_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
         return NativeResponse::error("A profile with this name already exists. Please choose another name.");
     }
 
-    let new_profile_path = Ulid::new().to_string();
+    let new_profile_path = "profile-".to_owned() + &Ulid::new().to_string();
 
     let new_profile = ProfileEntry {
         id: calc_profile_id(&new_profile_path, true),

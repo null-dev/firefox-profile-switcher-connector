@@ -38,4 +38,4 @@ jobs:
       - name: Build Windows binary
         run: cargo build --verbose --release
       - name: Build Windows installer
-        run: cargo wix
+        run: cargo wix --verbose --nocapture
