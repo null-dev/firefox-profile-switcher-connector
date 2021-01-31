@@ -15,11 +15,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Update package repositories
-        run: sudo apt-get update
-      - name: Install packaging utilities
-        run: sudo apt-get install rpm build-essential
-
       - name: Install rpm packager for cargo
         run: cargo install cargo-rpm
       - name: Install deb packager for cargo
