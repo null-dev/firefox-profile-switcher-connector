@@ -10,10 +10,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  build-linux:
     runs-on: ubuntu-latest
-
     steps:
       - name: Install rpm packager for cargo
         run: cargo install cargo-rpm
@@ -30,3 +28,14 @@ jobs:
 
       - name: Run tests
         run: cargo test --verbose
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Install wix packager for cargo
+        run: cargo install cargo-wix
+
+      - uses: actions/checkout@v2
+      - name: Build Windows binary
+        run: cargo build --verbose --release
+      - name: Build Windows installer
+        run: cargo wix

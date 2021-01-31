@@ -1,0 +1,9 @@
+{
+    "allowed_extensions": [
+        "profile-switcher-ff@nd.ax"
+    ],
+    "description": "Profile Switcher for Firefox",
+    "name": "ax.nd.profile_switcher_ff",
+    "path": "firefox-profile-switcher-connector.exe",
+    "type": "stdio"
+}

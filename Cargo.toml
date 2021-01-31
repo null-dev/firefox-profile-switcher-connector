@@ -4,7 +4,6 @@ version = "0.1.0"
 authors = ["nulldev <contact@andybao.me>"]
 edition = "2018"
 license = "GPL-3.0-only"
-license-file = "LICENSE.txt"
 description = "The native connector for the 'Profile Switcher for Firefox' extension"
 
 [[bin]]

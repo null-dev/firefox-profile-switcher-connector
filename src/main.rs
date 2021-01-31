@@ -232,8 +232,8 @@ struct AppState {
     config: Config,
     cur_profile_id: String,
     extension_id: Option<String>,
-    local_config_dir: PathBuf,
-    local_data_dir: PathBuf
+    config_dir: PathBuf,
+    data_dir: PathBuf
 }
 
 fn read_configuration(path: &PathBuf) -> Config {
@@ -285,17 +285,17 @@ enum ReadProfilesError {
     BadAvatarStoreFormat(serde_json::Error)
 }
 
-fn avatar_data_path(local_config_dir: &Path) -> PathBuf {
-    local_config_dir.join("avatars.json")
+fn avatar_data_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("avatars.json")
 }
 
-fn read_profiles(config: &Config, local_config_dir: &Path) -> Result<ProfilesIniState, ReadProfilesError> {
+fn read_profiles(config: &Config, config_dir: &Path) -> Result<ProfilesIniState, ReadProfilesError> {
     let profiles_conf = Ini::load_from_file(config.profiles_ini_path())
         .map_err(ReadProfilesError::IniError)?;
 
     let avatar_data: AvatarData = OpenOptions::new()
         .read(true)
-        .open(avatar_data_path(local_config_dir))
+        .open(avatar_data_path(config_dir))
         .map_err(ReadProfilesError::AvatarStoreError)
         .and_then(|f| serde_json::from_reader(f)
             .map_err(ReadProfilesError::BadAvatarStoreFormat))
@@ -362,7 +362,7 @@ enum WriteProfilesError {
     OpenAvatarFileError(io::Error),
     WriteAvatarFileError(serde_json::Error)
 }
-fn write_profiles(config: &Config, local_config_dir: &Path, state: &ProfilesIniState) -> Result<(), WriteProfilesError> {
+fn write_profiles(config: &Config, config_dir: &Path, state: &ProfilesIniState) -> Result<(), WriteProfilesError> {
     // Build avatar data
     let mut avatar_data = AvatarData {
         avatars: HashMap::new()
@@ -378,7 +378,7 @@ fn write_profiles(config: &Config, local_config_dir: &Path, state: &ProfilesIniS
         .create(true)
         .truncate(true)
         .write(true)
-        .open(avatar_data_path(local_config_dir))
+        .open(avatar_data_path(config_dir))
         .map_err(WriteProfilesError::OpenAvatarFileError)?;
 
     serde_json::to_writer(avatar_file, &avatar_data)
@@ -510,7 +510,7 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: u32) {
             });
         }
         IPC_CMD_UPDATE_PROFILE_LIST => {
-            match read_profiles(&app_state.config, &app_state.local_config_dir) {
+            match read_profiles(&app_state.config, &app_state.config_dir) {
                 Ok(profiles) => {
                     // Notify updated profile list
                     write_native_response(NativeResponseWrapper {
@@ -606,16 +606,16 @@ fn main() {
                                         "FirefoxProfileSwitcher")
         .expect("Could not initialize configuration (failed to find storage dir)!");
     let pref_dir = project_dirs.preference_dir();
-    let local_data_dir = project_dirs.data_local_dir();
+    let data_dir = project_dirs.data_local_dir();
 
     // mkdirs
     fs::create_dir_all(pref_dir);
-    fs::create_dir_all(local_data_dir);
+    fs::create_dir_all(data_dir);
 
     // Setup logging
     fern::Dispatch::new()
         .level(log::LevelFilter::Trace)
-        .chain(fern::log_file(local_data_dir.join("log.txt"))
+        .chain(fern::log_file(data_dir.join("log.txt"))
             .expect("Unable to open logfile!"))
         .apply()
         .expect("Failed to setup logging!");
@@ -682,8 +682,8 @@ fn main() {
         config,
         cur_profile_id,
         extension_id: extension_id.cloned(),
-        local_config_dir: pref_dir.to_path_buf(),
-        local_data_dir: local_data_dir.to_path_buf()
+        config_dir: pref_dir.to_path_buf(),
+        data_dir: data_dir.to_path_buf()
     };
 
     // Begin IPC
@@ -712,7 +712,7 @@ fn main() {
 
         // TODO Lock SI when updating profile list over IPC
         // SI lock
-        let lock_path = local_data_dir.join("si.lock");
+        let lock_path = data_dir.join("si.lock");
         // Create/open SI lockfile
         let lock_file = OpenOptions::new()
             .create(true)
@@ -735,7 +735,7 @@ fn main() {
 }
 
 fn process_message(app_state: &AppState, msg: NativeMessage) -> NativeResponse {
-    let mut profiles = match read_profiles(&app_state.config, &app_state.local_config_dir) {
+    let mut profiles = match read_profiles(&app_state.config, &app_state.config_dir) {
         Ok(p) => p,
         Err(e) => {
             return NativeResponse::error_with_dbg_msg("Failed to load profile list.", e);
@@ -973,7 +973,7 @@ fn process_cmd_create_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
     };
     profiles.profile_entries.push(new_profile);
 
-    if let Err(e) = write_profiles(&app_state.config, &app_state.local_config_dir, profiles) {
+    if let Err(e) = write_profiles(&app_state.config, &app_state.config_dir, profiles) {
         return NativeResponse::error_with_dbg_msg("Failed to save new changes!", e);
     }
     notify_profile_changed(app_state, profiles);
@@ -1011,7 +1011,7 @@ fn process_cmd_delete_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
     fs::remove_dir_all(profile_path);
 
     // Write new profile list
-    if let Err(e) = write_profiles(&app_state.config, &app_state.local_config_dir, profiles) {
+    if let Err(e) = write_profiles(&app_state.config, &app_state.config_dir, profiles) {
         return NativeResponse::error_with_dbg_msg("Failed to save new changes!", e);
     }
     notify_profile_changed(app_state, profiles);
@@ -1044,7 +1044,7 @@ fn process_cmd_update_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
         avatar: profile.avatar.clone()
     };
 
-    if let Err(e) = write_profiles(&app_state.config, &app_state.local_config_dir, profiles) {
+    if let Err(e) = write_profiles(&app_state.config, &app_state.config_dir, profiles) {
         return NativeResponse::error_with_dbg_msg("Failed to save new changes!", e);
     }
     notify_profile_changed(app_state, profiles);
