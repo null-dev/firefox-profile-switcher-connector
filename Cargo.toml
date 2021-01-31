@@ -1,0 +1,52 @@
+[package]
+name = "firefox_profile_switcher_connector"
+version = "0.1.0"
+authors = ["nulldev <contact@andybao.me>"]
+edition = "2018"
+license = "GPL-3.0-only"
+license-file = "LICENSE.txt"
+description = "The native connector for the 'Profile Switcher for Firefox' extension"
+
+[[bin]]
+name = "firefox_profile_switcher_connector"
+test = false
+bench = false
+
+[dependencies]
+rust-ini = "0.16"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+byteorder = "1.4.2"
+directories = "3.0"
+fs2 = "0.4"
+cfg-if = "0.1"
+ring = "0.16.15"
+data-encoding = "2.3"
+ulid = "0.4"
+nix = "0.19"
+libc = "0.2.82"
+interprocess = "1.0"
+log = "0.4"
+fern = "0.6.0"
+url = "2.2.0"
+
+[package.metadata.deb]
+name = "ff-pswitch-connector"
+assets = [
+    # binary
+    ["target/release/firefox_profile_switcher_connector", "/usr/bin/ff-pswitch-connector", "755"],
+    # manifest
+    ["manifest/manifest-linux.json", "/usr/lib/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json", "644"]
+]
+
+[package.metadata.rpm]
+package = "ff-pswitch-connector"
+
+[package.metadata.rpm.cargo]
+buildflags = ["--release"]
+
+[package.metadata.rpm.targets]
+firefox_profile_switcher_connector = { path = "/usr/bin/ff-pswitch-connector" }
+
+[package.metadata.rpm.files]
+"manifest-linux.json" = { path = "/usr/lib/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json" }
