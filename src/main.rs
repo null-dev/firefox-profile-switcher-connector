@@ -758,6 +758,7 @@ fn main() {
             Err(_) => read_incoming_message(&mut io::stdin())
         };
 
+        /*
         // TODO Lock SI when updating profile list over IPC
         // SI lock
         let lock_path = data_dir.join("si.lock");
@@ -770,6 +771,7 @@ fn main() {
         // Lock the lockfile
         lock_file.lock_exclusive()
             .expect("Failed to grab single-instance lock!");
+         */
 
         let response = process_message(&app_state, message.msg);
 
