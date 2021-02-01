@@ -764,6 +764,7 @@ fn main() {
         // Create/open SI lockfile
         let lock_file = OpenOptions::new()
             .create(true)
+            .write(true)
             .open(&lock_path)
             .expect("Failed to open single-instance lock!");
         // Lock the lockfile
