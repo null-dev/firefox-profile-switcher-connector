@@ -840,7 +840,7 @@ fn process_cmd_initialize(app_state: &mut AppState,
 
         let ext_installed = match fs::read_dir(storage_path) {
             Ok(p) => p,
-            Err(e) => return NativeResponse::error_with_dbg_msg("Could not read storage dir", e)
+            Err(_) => continue // Skip profiles that do not have valid storage dir
         }.filter_map(|it| match it {
             Ok(entry) => Some(entry),
             Err(_) => None
