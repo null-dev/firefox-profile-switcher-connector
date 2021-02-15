@@ -22,12 +22,18 @@ cfg-if = "0.1"
 ring = "0.16.15"
 data-encoding = "2.3"
 ulid = "0.4"
-nix = "0.19"
-libc = "0.2.82"
 interprocess = "1.0"
 log = "0.4"
 fern = "0.6.0"
 url = "2.2.0"
+
+[target.'cfg(target_family = "unix")'.dependencies]
+nix = "0.19"
+libc = "0.2.82"
+
+[target.'cfg(target_family = "windows")'.dependencies]
+win32job = "1"
+winapi = "0.3.9"
 
 [package.metadata.deb]
 name = "ff-pswitch-connector"

@@ -8,7 +8,6 @@ extern crate cfg_if;
 extern crate ring;
 extern crate data_encoding;
 extern crate ulid;
-extern crate libc;
 extern crate interprocess;
 extern crate fern;
 extern crate log;
@@ -22,7 +21,7 @@ use byteorder::{ReadBytesExt, NativeEndian, WriteBytesExt, NetworkEndian};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use directories::ProjectDirs;
-use std::fs::{OpenOptions, File};
+use std::fs::{OpenOptions, File, DirEntry};
 use fs2::FileExt;
 use std::fmt::Debug;
 use cfg_if::cfg_if;
@@ -31,7 +30,7 @@ use data_encoding::{HEXUPPER};
 use std::process::{Command, Child, exit, Stdio};
 use ulid::Ulid;
 use interprocess::local_socket::{LocalSocketListener, ToLocalSocketName, LocalSocketStream};
-use std::sync::Mutex;
+use std::sync::{Mutex, Arc};
 use std::iter::Map;
 use std::collections::HashMap;
 use serde_json::Value;
@@ -42,10 +41,13 @@ use std::env::VarError;
 cfg_if! {
     if #[cfg(target_family = "unix")] {
         extern crate nix;
+        extern crate libc;
 
         use nix::unistd::ForkResult;
         use nix::sys::wait::waitpid;
     } else if #[cfg(target_family = "windows")] {
+        extern crate win32job;
+        extern crate winapi;
     } else {
         compile_error!("Unknown OS!");
     }
@@ -55,14 +57,20 @@ const APP_VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 // === NATIVE REQUEST ===
 #[derive(Serialize, Deserialize)]
-struct NativeMessageCreateProfile {
-    name: String,
-    avatar: String
+struct NativeMessageInitialize {
+    extension_id: String,
+    profile_id: Option<String>
 }
 
 #[derive(Serialize, Deserialize)]
 struct NativeMessageLaunchProfile {
     profile_id: String
+}
+
+#[derive(Serialize, Deserialize)]
+struct NativeMessageCreateProfile {
+    name: String,
+    avatar: String
 }
 
 #[derive(Serialize, Deserialize)]
@@ -80,6 +88,7 @@ struct NativeMessageUpdateProfile {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "command")]
 enum NativeMessage {
+    Initialize(NativeMessageInitialize),
     LaunchProfile(NativeMessageLaunchProfile),
     CreateProfile(NativeMessageCreateProfile),
     DeleteProfile(NativeMessageDeleteProfile),
@@ -186,6 +195,9 @@ impl NativeResponseProfileListProfileEntry {
 #[derive(Serialize)]
 #[serde(untagged)]
 enum NativeResponseData {
+    Initialized {
+        cached: bool
+    },
     ProfileLaunched,
     ProfileCreated {
         profile: NativeResponseProfileListProfileEntry
@@ -268,7 +280,7 @@ impl Default for Config {
 #[derive(Clone)]
 struct AppState {
     config: Config,
-    cur_profile_id: String,
+    cur_profile_id: Arc<Mutex<Option<String>>>,
     extension_id: Option<String>,
     config_dir: PathBuf,
     data_dir: PathBuf
@@ -521,8 +533,8 @@ fn handle_conn(app_state: &AppState, mut conn: LocalSocketStream) {
     }
 }
 
-fn setup_ipc(app_state: &AppState) -> std::result::Result<(), io::Error> {
-    let socket_name = get_ipc_socket_name(&app_state.cur_profile_id, true)?;
+fn setup_ipc(cur_profile_id: &str, app_state: &AppState) -> std::result::Result<(), io::Error> {
+    let socket_name = get_ipc_socket_name(cur_profile_id, true)?;
 
     let listener = LocalSocketListener::bind(socket_name)?;
     for mut conn in listener.incoming() {
@@ -552,14 +564,19 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: u32) {
         IPC_CMD_UPDATE_PROFILE_LIST => {
             match read_profiles(&app_state.config, &app_state.config_dir) {
                 Ok(profiles) => {
-                    // Notify updated profile list
-                    write_native_response(NativeResponseWrapper {
-                        id: NATIVE_RESP_ID_EVENT,
-                        resp: NativeResponse::event(NativeResponseEvent::ProfileList {
-                            current_profile_id: app_state.cur_profile_id.clone(),
-                            profiles: profiles.profile_entries.iter().map(NativeResponseProfileListProfileEntry::from_profile_entry).collect()
-                        })
-                    });
+                    if let Some(pid) = &app_state.cur_profile_id.lock()
+                        .expect("Lock error!")
+                        .as_ref()
+                        .map(|it| it.clone()) {
+                        // Notify updated profile list
+                        write_native_response(NativeResponseWrapper {
+                            id: NATIVE_RESP_ID_EVENT,
+                            resp: NativeResponse::event(NativeResponseEvent::ProfileList {
+                                current_profile_id: pid.to_owned(),
+                                profiles: profiles.profile_entries.iter().map(NativeResponseProfileListProfileEntry::from_profile_entry).collect()
+                            })
+                        });
+                    }
                 },
                 Err(e) => {
                     log::error!("Failed to update profile list: {:?}", e);
@@ -585,7 +602,8 @@ enum IpcError {
 }
 
 fn send_ipc_cmd(app_state: &AppState, target_profile_id: &str, cmd: u32) -> std::result::Result<(), IpcError> {
-    if app_state.cur_profile_id == target_profile_id {
+    let cur_profile_id = app_state.cur_profile_id.lock().expect("Lock error!");
+    if cur_profile_id.is_some() && cur_profile_id.as_ref().unwrap() == target_profile_id {
         handle_ipc_cmd(app_state, cmd);
     } else {
         let socket_name = get_ipc_socket_name(target_profile_id, false)
@@ -680,7 +698,8 @@ fn main() {
     let config = read_configuration(&config_path);
 
     // Calculate current profile location
-    let cur_profile_id = {
+    // TODO This is unreliable on Windows as this env var is not always set to the correct dir
+    /*let cur_profile_id = {
         const CRASHREPORTER_ENV_VAR: &'static str = "MOZ_CRASHREPORTER_EVENTS_DIRECTORY";
         let crash_reporter_var = match env::var(CRASHREPORTER_ENV_VAR) {
             Ok(v) => v,
@@ -724,25 +743,26 @@ fn main() {
         });
 
         cur_profile_id
-    };
+    };*/
+
+    // Ensure that all child processes breakaway from us
+    cfg_if! {
+        if #[cfg(target_family = "windows")] {
+            let mut job_limits = win32job::ExtendedLimitInfo::new();
+            job_limits.0.BasicLimitInformation.LimitFlags |= winapi::um::winnt::JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+            if let Ok(job) = win32job::Job::create_with_limit_info(&mut job_limits) {
+                job.assign_current_process();
+            }
+        }
+    }
 
     let app_state = AppState {
         config,
-        cur_profile_id,
+        cur_profile_id: Arc::new(Mutex::new(None)),
         extension_id: extension_id.cloned(),
         config_dir: pref_dir.to_path_buf(),
         data_dir: data_dir.to_path_buf()
     };
-
-    // Begin IPC
-    {
-        let app_state = app_state.clone();
-        thread::spawn(move || {
-            if let Err(e) = setup_ipc(&app_state) {
-                log::error!("Failed to setup IPC server: {:?}", e);
-            }
-        });
-    }
 
     let mut using_debug = false; // TODO DEBUG STUFF
     loop {
@@ -793,6 +813,7 @@ fn process_message(app_state: &AppState, msg: NativeMessage) -> NativeResponse {
     };
 
     match msg {
+        NativeMessage::Initialize(msg) => process_cmd_initialize(app_state, &profiles, msg),
         NativeMessage::LaunchProfile(msg) => process_cmd_launch_profile(app_state, &profiles, msg),
         NativeMessage::CreateProfile(msg) => process_cmd_create_profile(app_state, &mut profiles, msg),
         NativeMessage::DeleteProfile(msg) => process_cmd_delete_profile(app_state, &mut profiles, msg),
@@ -802,6 +823,65 @@ fn process_message(app_state: &AppState, msg: NativeMessage) -> NativeResponse {
 }
 
 // === COMMANDS ===
+fn process_cmd_initialize(app_state: &AppState,
+                          profiles: &ProfilesIniState,
+                          msg: NativeMessageInitialize) -> NativeResponse {
+    if let Some(profile_id) = &msg.profile_id {
+        finish_init(app_state, profiles, profile_id);
+        return NativeResponse::success(NativeResponseData::Initialized { cached: true })
+    }
+
+    // Extension didn't tell us profile id so we have to determine it
+
+    // Search every profile
+    for profile in &profiles.profile_entries {
+        let mut storage_path = profile.full_path(&app_state.config);
+        storage_path.push("storage");
+        storage_path.push("default");
+
+        let ext_installed = match fs::read_dir(storage_path) {
+            Ok(p) => p,
+            Err(e) => return NativeResponse::error_with_dbg_msg("Could not read storage dir", e)
+        }.filter_map(|it| match it {
+            Ok(entry) => Some(entry),
+            Err(_) => None
+        }).any(|it| it.file_name()
+            .to_string_lossy()
+            .starts_with(&("moz-extension+++".to_owned() + &msg.extension_id))
+        );
+
+        if ext_installed {
+            finish_init(app_state, profiles, &profile.id);
+            return NativeResponse::success(NativeResponseData::Initialized { cached: false })
+        }
+    }
+
+    return NativeResponse::error("Unable to detect current profile.")
+}
+
+fn finish_init(app_state: &AppState, profiles: &ProfilesIniState, profile_id: &str) {
+    *app_state.cur_profile_id.lock().expect("Lock error!") = Some(profile_id.to_owned());
+
+    // Notify extension of new profile list
+    write_native_response(NativeResponseWrapper {
+        id: NATIVE_RESP_ID_EVENT,
+        resp: NativeResponse::event(NativeResponseEvent::ProfileList {
+            current_profile_id: profile_id.to_owned(),
+            profiles: profiles.profile_entries.iter().map(NativeResponseProfileListProfileEntry::from_profile_entry).collect()
+        })
+    });
+
+    // Begin IPC
+    {
+        let profile_id = profile_id.to_owned();
+        let app_state = app_state.clone();
+        thread::spawn(move || {
+            if let Err(e) = setup_ipc(&profile_id, &app_state) {
+                log::error!("Failed to setup IPC server: {:?}", e);
+            }
+        });
+    }
+}
 
 fn process_cmd_launch_profile(app_state: &AppState,
                               profiles: &ProfilesIniState,
@@ -862,6 +942,7 @@ fn process_cmd_launch_profile(app_state: &AppState,
                 Err(e) => NativeResponse::error_with_dbg_msg("Failed to launch browser with new profile (fork error)!", e)
             }
         } else if #[cfg(target_family = "windows")] {
+            // TODO Change app ID to separate on taskbar?
             match spawn_browser_proc(&parent_proc, &profile.name) {
                 Ok(_) => NativeResponse::success(NativeResponseData::ProfileLaunched),
                 Err(e) => NativeResponse::error_with_dbg_msg("Failed to launch browser with new profile!", e)
@@ -941,7 +1022,8 @@ fn process_cmd_create_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
     // Read current extensions JSON
     // TODO Extract this into function to fix this huge if-let chain
     {
-        if let Some(our_profile) = profiles.profile_entries.iter().find(|p| p.id == app_state.cur_profile_id) {
+        let cur_profile_id = app_state.cur_profile_id.lock().expect("Lock error!");
+        if let Some(our_profile) = profiles.profile_entries.iter().find(|p| Some(&p.id) == cur_profile_id.as_ref()) {
             let mut extensions_path = our_profile.full_path(&app_state.config);
             extensions_path.push("extensions.json");
             if let Ok(extensions_file) = OpenOptions::new()
@@ -1103,8 +1185,9 @@ fn process_cmd_update_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
 }
 
 fn process_cmd_close_manager(app_state: &AppState, profiles: &ProfilesIniState) -> NativeResponse {
+    let cur_profile_id = app_state.cur_profile_id.lock().expect("Lock error!");
     for profile in &profiles.profile_entries {
-        if profile.id != app_state.cur_profile_id {
+        if Some(&profile.id) != cur_profile_id.as_ref() {
             send_ipc_cmd(app_state, &profile.id, IPC_CMD_CLOSE_MANAGER);
         }
     }
