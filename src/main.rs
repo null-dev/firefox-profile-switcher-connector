@@ -82,7 +82,8 @@ struct NativeMessageDeleteProfile {
 struct NativeMessageUpdateProfile {
     profile_id: String,
     name: String,
-    avatar: String
+    avatar: String,
+    default: bool
 }
 
 #[derive(Serialize, Deserialize)]
@@ -240,6 +241,11 @@ impl Config {
         let mut profiles_ini = self.browser_profile_dir.clone();
         profiles_ini.push("profiles.ini");
         return profiles_ini;
+    }
+    fn installs_ini_path(&self) -> PathBuf {
+        let mut installs_ini = self.browser_profile_dir.clone();
+        installs_ini.push("installs.ini");
+        return installs_ini;
     }
 }
 
@@ -439,6 +445,7 @@ fn write_profiles(config: &Config, config_dir: &Path, state: &ProfilesIniState) 
     // Write profile data
     let mut new_ini = state.backing_ini.clone();
 
+    let mut default_profile_path = None::<&str>;
     for (i, profile) in state.profile_entries.iter().enumerate() {
         let mut section = &mut new_ini.with_section(Some("Profile".to_owned() + &i.to_string()));
         section = section.set("Name", profile.name.as_str())
@@ -446,11 +453,41 @@ fn write_profiles(config: &Config, config_dir: &Path, state: &ProfilesIniState) 
             .set("Path", profile.path.as_str());
         if profile.default {
             section.set("Default", "1");
+            default_profile_path = Some(&profile.path);
+        }
+    }
+
+    if let Some(default_profile_path) = default_profile_path {
+        for (sec, prop) in &mut new_ini {
+            if let Some(sec) = sec {
+                if sec.starts_with("Install") && prop.contains_key("Default") {
+                    prop.insert("Default", default_profile_path);
+                    prop.insert("Locked", "0");
+                }
+            }
         }
     }
 
     if let Err(e) = new_ini.write_to_file(config.profiles_ini_path()) {
         return Err(WriteProfilesError::WriteIniError(e))
+    }
+
+    // Write install INI
+    if let Some(default_profile_path) = default_profile_path {
+        let mut installs_conf = Ini::load_from_file(config.installs_ini_path());
+        if let Ok(mut installs_conf) = installs_conf {
+            for (sec, prop) in &mut installs_conf {
+                if let Some(sec) = sec {
+                    if prop.contains_key("Default") {
+                        prop.insert("Default", default_profile_path);
+                        prop.insert("Locked", "0");
+                    }
+                }
+            }
+            if let Err(e) = installs_conf.write_to_file(config.installs_ini_path()) {
+                log::warn!("Failed to write installs.ini: {:?}", e);
+            }
+        }
     }
 
     Ok(())
@@ -1140,6 +1177,13 @@ fn process_cmd_delete_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
     // Delete profile files
     fs::remove_dir_all(profile_path);
 
+    // Make another profile the default
+    if profile.default {
+        if let Some(new_def_profile) = profiles.profile_entries.first_mut() {
+            new_def_profile.default = true
+        }
+    }
+
     // Write new profile list
     if let Err(e) = write_profiles(&app_state.config, &app_state.config_dir, profiles) {
         return NativeResponse::error_with_dbg_msg("Failed to save new changes!", e);
@@ -1167,12 +1211,24 @@ fn process_cmd_update_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
     profile.name = msg.name;
     profile.avatar = Some(msg.avatar);
 
+    if msg.default {
+        profile.default = true
+    }
+
     let resp = NativeResponseProfileListProfileEntry {
-        id: msg.profile_id,
+        id: msg.profile_id.clone(),
         name: profile.name.clone(),
         default: profile.default,
         avatar: profile.avatar.clone()
     };
+
+    if msg.default {
+        for profile in profiles.profile_entries.iter_mut() {
+            if profile.id != msg.profile_id {
+                profile.default = false
+            }
+        }
+    }
 
     if let Err(e) = write_profiles(&app_state.config, &app_state.config_dir, profiles) {
         return NativeResponse::error_with_dbg_msg("Failed to save new changes!", e);
