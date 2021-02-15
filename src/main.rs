@@ -280,7 +280,7 @@ impl Default for Config {
 #[derive(Clone)]
 struct AppState {
     config: Config,
-    cur_profile_id: Arc<Mutex<Option<String>>>,
+    cur_profile_id: Option<String>,
     extension_id: Option<String>,
     config_dir: PathBuf,
     data_dir: PathBuf
@@ -564,8 +564,7 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: u32) {
         IPC_CMD_UPDATE_PROFILE_LIST => {
             match read_profiles(&app_state.config, &app_state.config_dir) {
                 Ok(profiles) => {
-                    if let Some(pid) = &app_state.cur_profile_id.lock()
-                        .expect("Lock error!")
+                    if let Some(pid) = &app_state.cur_profile_id
                         .as_ref()
                         .map(|it| it.clone()) {
                         // Notify updated profile list
@@ -602,7 +601,7 @@ enum IpcError {
 }
 
 fn send_ipc_cmd(app_state: &AppState, target_profile_id: &str, cmd: u32) -> std::result::Result<(), IpcError> {
-    let cur_profile_id = app_state.cur_profile_id.lock().expect("Lock error!");
+    let cur_profile_id = &app_state.cur_profile_id;
     if cur_profile_id.is_some() && cur_profile_id.as_ref().unwrap() == target_profile_id {
         handle_ipc_cmd(app_state, cmd);
     } else {
@@ -756,9 +755,9 @@ fn main() {
         }
     }
 
-    let app_state = AppState {
+    let mut app_state = AppState {
         config,
-        cur_profile_id: Arc::new(Mutex::new(None)),
+        cur_profile_id: None,
         extension_id: extension_id.cloned(),
         config_dir: pref_dir.to_path_buf(),
         data_dir: data_dir.to_path_buf()
@@ -793,7 +792,7 @@ fn main() {
             .expect("Failed to grab single-instance lock!");
          */
 
-        let response = process_message(&app_state, message.msg);
+        let response = process_message(&mut app_state, message.msg);
 
         write_native_response(NativeResponseWrapper {
             id: message.id,
@@ -804,7 +803,7 @@ fn main() {
     }
 }
 
-fn process_message(app_state: &AppState, msg: NativeMessage) -> NativeResponse {
+fn process_message(app_state: &mut AppState, msg: NativeMessage) -> NativeResponse {
     let mut profiles = match read_profiles(&app_state.config, &app_state.config_dir) {
         Ok(p) => p,
         Err(e) => {
@@ -823,7 +822,7 @@ fn process_message(app_state: &AppState, msg: NativeMessage) -> NativeResponse {
 }
 
 // === COMMANDS ===
-fn process_cmd_initialize(app_state: &AppState,
+fn process_cmd_initialize(app_state: &mut AppState,
                           profiles: &ProfilesIniState,
                           msg: NativeMessageInitialize) -> NativeResponse {
     if let Some(profile_id) = &msg.profile_id {
@@ -859,8 +858,8 @@ fn process_cmd_initialize(app_state: &AppState,
     return NativeResponse::error("Unable to detect current profile.")
 }
 
-fn finish_init(app_state: &AppState, profiles: &ProfilesIniState, profile_id: &str) {
-    *app_state.cur_profile_id.lock().expect("Lock error!") = Some(profile_id.to_owned());
+fn finish_init(app_state: &mut AppState, profiles: &ProfilesIniState, profile_id: &str) {
+    app_state.cur_profile_id = Some(profile_id.to_owned());
 
     // Notify extension of new profile list
     write_native_response(NativeResponseWrapper {
@@ -1022,8 +1021,7 @@ fn process_cmd_create_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
     // Read current extensions JSON
     // TODO Extract this into function to fix this huge if-let chain
     {
-        let cur_profile_id = app_state.cur_profile_id.lock().expect("Lock error!");
-        if let Some(our_profile) = profiles.profile_entries.iter().find(|p| Some(&p.id) == cur_profile_id.as_ref()) {
+        if let Some(our_profile) = profiles.profile_entries.iter().find(|p| Some(&p.id) == app_state.cur_profile_id.as_ref()) {
             let mut extensions_path = our_profile.full_path(&app_state.config);
             extensions_path.push("extensions.json");
             if let Ok(extensions_file) = OpenOptions::new()
@@ -1185,9 +1183,8 @@ fn process_cmd_update_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
 }
 
 fn process_cmd_close_manager(app_state: &AppState, profiles: &ProfilesIniState) -> NativeResponse {
-    let cur_profile_id = app_state.cur_profile_id.lock().expect("Lock error!");
     for profile in &profiles.profile_entries {
-        if Some(&profile.id) != cur_profile_id.as_ref() {
+        if Some(&profile.id) != app_state.cur_profile_id.as_ref() {
             send_ipc_cmd(app_state, &profile.id, IPC_CMD_CLOSE_MANAGER);
         }
     }
