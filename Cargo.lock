@@ -255,7 +255,6 @@ dependencies = [
  "serde_json",
  "ulid",
  "url",
- "win32job",
  "winapi",
 ]
 
@@ -1087,16 +1086,6 @@ checksum = "222b1ef9334f92a21d3fb53dc3fd80f30836959a90f9274a626d7e06315ba3c3"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "win32job"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b2a14136f6c8be9146ac6345774ab32cb93e7985319b4a1b42abb663bd64235"
-dependencies = [
- "thiserror",
- "winapi",
 ]
 
 [[package]]

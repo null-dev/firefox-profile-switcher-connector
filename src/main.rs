@@ -46,8 +46,9 @@ cfg_if! {
         use nix::unistd::ForkResult;
         use nix::sys::wait::waitpid;
     } else if #[cfg(target_family = "windows")] {
-        extern crate win32job;
         extern crate winapi;
+
+        use std::os::windows::process::CommandExt;
     } else {
         compile_error!("Unknown OS!");
     }
@@ -781,17 +782,6 @@ fn main() {
         cur_profile_id
     };*/
 
-    // Ensure that all child processes breakaway from us
-    cfg_if! {
-        if #[cfg(target_family = "windows")] {
-            let mut job_limits = win32job::ExtendedLimitInfo::new();
-            job_limits.0.BasicLimitInformation.LimitFlags |= winapi::um::winnt::JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
-            if let Ok(job) = win32job::Job::create_with_limit_info(&mut job_limits) {
-                job.assign_current_process();
-            }
-        }
-    }
-
     let mut app_state = AppState {
         config,
         cur_profile_id: None,
@@ -1251,7 +1241,13 @@ fn process_cmd_close_manager(app_state: &AppState, profiles: &ProfilesIniState) 
 // === PROCESS UTILS ===
 
 fn spawn_browser_proc(bin_path: &PathBuf, profile_name: &str) -> io::Result<Child> {
-    return Command::new(bin_path)
+    let mut command = Command::new(bin_path);
+    cfg_if! {
+        if #[cfg(target_family = "windows")] {
+            command.creation_flags((winapi::um::winbase::DETACHED_PROCESS | winapi::um::winbase::CREATE_BREAKAWAY_FROM_JOB) as u32);
+        }
+    }
+    return command
         .arg("-P")
         .arg(profile_name)
         .stdin(Stdio::null())
