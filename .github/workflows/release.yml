@@ -2,9 +2,9 @@ name: Release
 
 on:
   push:
-    branches: [ master ]
+    branches: [ develop, master ]
   pull_request:
-    branches: [ master ]
+    branches: [ develop ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -30,11 +30,12 @@ jobs:
         run: cargo test --verbose
       - name: Archive build artifacts
         uses: actions/upload-artifact@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           name: linux-artifacts
           path: |
             target/debian
-            target/release/rpmbuild/RPMs
+            target/release/rpmbuild/RPMS
   build-windows:
     runs-on: windows-latest
     steps:
@@ -46,9 +47,29 @@ jobs:
         run: cargo build --verbose --release
       - name: Build Windows installer
         run: cargo wix --verbose --nocapture
+
+      - name: Run tests
+        run: cargo test --verbose
       - name: Archive build artifacts
         uses: actions/upload-artifact@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           name: windows-artifacts
           path: |
             target/wix
+            #  release:
+            #    needs: [build-linux, build-windows]
+            #    if: startsWith(github.ref, 'refs/tags/')
+            #    runs-on: ubuntu-latest
+            #    steps:
+            #      - name: Generate empty package.json for changelog generator
+            #        run: echo "{}" > package.json
+            #      - name: Changelog
+            #        uses: scottbrenner/generate-changelog-action@master
+            #        id: Changelog
+            #      - name: Release
+            #        uses: softprops/action-gh-release@v1
+            #        with:
+            #          files: Release.txt
+            #        env:
+            #          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
