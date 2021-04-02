@@ -77,7 +77,7 @@ jobs:
         run: |
           pushd linux-artifacts
           find . -mindepth 2 -type f -exec mv -t . -n '{}' + # Flatten directory
-          rename -E 's/^ff-pswitch-connector_.+?_(.+\.deb)$/linux-$1/' *.dev
+          rename -E 's/^ff-pswitch-connector_.+?_(.+\.deb)$/linux-$1/' *.deb
           rename -E 's/^ff-pswitch-connector-.+\.(.+\.rpm)$/linux-$1/' *.rpm
           popd
           pushd windows-artifacts
