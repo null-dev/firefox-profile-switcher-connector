@@ -77,15 +77,15 @@ jobs:
         run: |
           pushd linux-artifacts
           find . -mindepth 2 -type f -exec mv -t . -n '{}' + # Flatten directory
-          rename -n -E 's/^ff-pswitch-connector_.+?_(.+\.deb)$/linux-$1/' *.dev
-          rename -n -E 's/^ff-pswitch-connector-.+\.(.+\.rpm)$/linux-$1/' *.rpm
+          rename -E 's/^ff-pswitch-connector_.+?_(.+\.deb)$/linux-$1/' *.dev
+          rename -E 's/^ff-pswitch-connector-.+\.(.+\.rpm)$/linux-$1/' *.rpm
           popd
           pushd windows-artifacts
           find . -mindepth 2 -type f -exec mv -t . -n '{}' + # Flatten directory
-          rename -n -E 's/^firefox_profile_switcher_connector-.+?-(.+msi)$/windows-$1/' *.msi
+          rename -E 's/^firefox_profile_switcher_connector-.+?-(.+msi)$/windows-$1/' *.msi
           popd
-          rename -n -E 's/amd64/x86_64/' linux-artifacts/* windows-artifacts/*
-          rename -n -E 's/x86_64/x64/' linux-artifacts/* windows-artifacts/*
+          rename -E 's/amd64/x86_64/' linux-artifacts/* windows-artifacts/*
+          rename -E 's/x86_64/x64/' linux-artifacts/* windows-artifacts/*
       - name: Generate empty package.json for changelog generator
         run: echo "{}" > package.json
       - name: Changelog
