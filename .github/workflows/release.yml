@@ -28,6 +28,13 @@ jobs:
 
       - name: Run tests
         run: cargo test --verbose
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: linux-artifacts
+          path: |
+            target/debian
+            target/release/rpmbuild/RPMs
   build-windows:
     runs-on: windows-latest
     steps:
@@ -39,3 +46,9 @@ jobs:
         run: cargo build --verbose --release
       - name: Build Windows installer
         run: cargo wix --verbose --nocapture
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: windows-artifacts
+          path: |
+            target/wix
