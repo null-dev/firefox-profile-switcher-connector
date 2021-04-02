@@ -5,6 +5,9 @@ on:
     branches: [ develop, master ]
   pull_request:
     branches: [ develop ]
+  create:
+    tags:
+      - v*
 
 env:
   CARGO_TERM_COLOR: always
