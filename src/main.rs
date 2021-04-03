@@ -83,7 +83,7 @@ struct NativeMessageDeleteProfile {
 struct NativeMessageUpdateProfile {
     profile_id: String,
     name: String,
-    avatar: String,
+    avatar: Option<String>,
     default: bool
 }
 
@@ -287,6 +287,7 @@ impl Default for Config {
 #[derive(Clone)]
 struct AppState {
     config: Config,
+    first_run: bool,
     cur_profile_id: Option<String>,
     extension_id: Option<String>,
     config_dir: PathBuf,
@@ -711,6 +712,8 @@ fn main() {
     let pref_dir = project_dirs.preference_dir();
     let data_dir = project_dirs.data_local_dir();
 
+    let first_run = !data_dir.exists();
+
     // mkdirs
     fs::create_dir_all(pref_dir);
     fs::create_dir_all(data_dir);
@@ -784,6 +787,7 @@ fn main() {
 
     let mut app_state = AppState {
         config,
+        first_run,
         cur_profile_id: None,
         extension_id: extension_id.cloned(),
         config_dir: pref_dir.to_path_buf(),
@@ -839,7 +843,7 @@ fn process_message(app_state: &mut AppState, msg: NativeMessage) -> NativeRespon
     };
 
     match msg {
-        NativeMessage::Initialize(msg) => process_cmd_initialize(app_state, &profiles, msg),
+        NativeMessage::Initialize(msg) => process_cmd_initialize(app_state, &mut profiles, msg),
         NativeMessage::LaunchProfile(msg) => process_cmd_launch_profile(app_state, &profiles, msg),
         NativeMessage::CreateProfile(msg) => process_cmd_create_profile(app_state, &mut profiles, msg),
         NativeMessage::DeleteProfile(msg) => process_cmd_delete_profile(app_state, &mut profiles, msg),
@@ -850,7 +854,7 @@ fn process_message(app_state: &mut AppState, msg: NativeMessage) -> NativeRespon
 
 // === COMMANDS ===
 fn process_cmd_initialize(app_state: &mut AppState,
-                          profiles: &ProfilesIniState,
+                          profiles: &mut ProfilesIniState,
                           msg: NativeMessageInitialize) -> NativeResponse {
     if let Some(profile_id) = &msg.profile_id {
         finish_init(app_state, profiles, profile_id);
@@ -877,7 +881,8 @@ fn process_cmd_initialize(app_state: &mut AppState,
         );
 
         if ext_installed {
-            finish_init(app_state, profiles, &profile.id);
+            let profile_id = profile.id.clone();
+            finish_init(app_state, profiles, &profile_id);
             return NativeResponse::success(NativeResponseData::Initialized { cached: false })
         }
     }
@@ -885,8 +890,27 @@ fn process_cmd_initialize(app_state: &mut AppState,
     return NativeResponse::error("Unable to detect current profile.")
 }
 
-fn finish_init(app_state: &mut AppState, profiles: &ProfilesIniState, profile_id: &str) {
+fn finish_init(app_state: &mut AppState, profiles: &mut ProfilesIniState, profile_id: &str) {
     app_state.cur_profile_id = Some(profile_id.to_owned());
+
+    if app_state.first_run {
+        app_state.first_run = false;
+
+        match profiles.profile_entries.iter_mut().find(|p| p.id == profile_id) {
+            Some(profile) => {
+                // Set first-run profile as default
+                profile.default = true;
+                for other_profile in profiles.profile_entries.iter_mut() {
+                    if other_profile.id != profile_id {
+                        other_profile.default = false
+                    }
+                }
+
+                write_profiles(&app_state.config, &app_state.config_dir, profiles);
+            }
+            None => log::error!("Failed to find first-run profile to set as default: {}", profile_id)
+        }
+    }
 
     // Notify extension of new profile list
     write_native_response(NativeResponseWrapper {
@@ -1199,7 +1223,7 @@ fn process_cmd_update_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
     };
 
     profile.name = msg.name;
-    profile.avatar = Some(msg.avatar);
+    profile.avatar = msg.avatar;
 
     if msg.default {
         profile.default = true
