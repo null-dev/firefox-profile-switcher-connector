@@ -4,6 +4,6 @@
     ],
     "description": "Profile Switcher for Firefox",
     "name": "ax.nd.profile_switcher_ff",
-    "path": "target/release/",
+    "path": "/usr/bin/ff-pswitch-connector",
     "type": "stdio"
 }
