@@ -89,8 +89,10 @@ jobs:
       - name: Generate empty package.json for changelog generator
         run: echo "{}" > package.json
       - name: Changelog
-        uses: scottbrenner/generate-changelog-action@master
         id: Changelog
+        uses: metcalfc/changelog-generator@v1.0.0
+        with:
+          myToken: ${{ secrets.GITHUB_TOKEN }}
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
