@@ -22,6 +22,8 @@ BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 rm -rf %{buildroot}
 mkdir -p %{buildroot}
 cp -a * %{buildroot}
+mkdir -p "%{buildroot}/usr/lib64/mozilla/native-messaging-hosts"
+cp "%{buildroot}/usr/lib/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json" "%{buildroot}/usr/lib64/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json"
 
 %clean
 rm -rf %{buildroot}
@@ -29,4 +31,5 @@ rm -rf %{buildroot}
 %files
 %defattr(-,root,root,-)
 /usr/lib/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json
+/usr/lib64/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json
 %{_bindir}/*
