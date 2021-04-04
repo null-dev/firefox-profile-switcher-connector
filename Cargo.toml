@@ -40,7 +40,8 @@ assets = [
     # binary
     ["target/release/firefox_profile_switcher_connector", "/usr/bin/ff-pswitch-connector", "755"],
     # manifest
-    ["manifest/manifest-linux.json", "/usr/lib/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json", "644"]
+    ["manifest/manifest-linux.json", "/usr/lib/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json", "644"],
+    ["manifest/manifest-linux.json", "/usr/lib64/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json", "644"]
 ]
 
 [package.metadata.rpm]
@@ -54,3 +55,4 @@ firefox_profile_switcher_connector = { path = "/usr/bin/ff-pswitch-connector" }
 
 [package.metadata.rpm.files]
 "manifest-linux.json" = { path = "/usr/lib/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json" }
+"manifest-linux2.json" = { path = "/usr/lib64/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json" }
