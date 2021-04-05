@@ -52,6 +52,7 @@ jobs:
       - name: Setup rust toolchain
         uses: actions-rs/toolchain@v1
         with:
+          toolchain: stable
           target: ${{ matrix.target }}
           override: true
           default: true
