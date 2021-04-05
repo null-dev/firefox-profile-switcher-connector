@@ -22,7 +22,7 @@ jobs:
             x86_64-unknown-linux-gnu,
         ]
     steps:
-      - name: Install gcc-multilib and 32-bit openssl
+      - name: Install 32-bit libraries
         if: matrix.target == 'i686-unknown-linux-gnu'
         run: |
           sudo dpkg --add-architecture i386
@@ -90,6 +90,37 @@ jobs:
           retention-days: 5
           path: |
             target/wix
+  build-mac:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [
+            aarch64-apple-darwin,
+            x86_64-apple-darwin,
+        ]
+    steps:
+      - name: Setup rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+          default: true
+      - uses: actions/checkout@v2
+      - name: Build Mac binary
+        run: cargo build --verbose --release
+      - name: Run tests
+        run: cargo test --verbose
+      - name: Rename binaries
+        run: mv target/release/firefox_profile_switcher_connector target/release/mac-${{ matrix.target }}
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: mac-artifacts
+          retention-days: 5
+          path: |
+            target/release/mac-${{ matrix.target }}
+            manifest/manifest-mac.json
   release:
     needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
@@ -114,10 +145,15 @@ jobs:
           find . -mindepth 2 -type f -exec mv -t . -n '{}' + # Flatten directory
           rename -E 's/^firefox_profile_switcher_connector-.+?-(.+msi)$/windows-$1/' *.msi
           popd
-          rename -E 's/amd64/x86_64/' linux-artifacts/* windows-artifacts/*
-          rename -E 's/x86_64/x64/' linux-artifacts/* windows-artifacts/*
-          rename -E 's/i386/i686/' linux-artifacts/* windows-artifacts/*
-          rename -E 's/i686/x86/' linux-artifacts/* windows-artifacts/*
+          pushd mac-artifacts
+          find . -mindepth 2 -type f -exec mv -t . -n '{}' + # Flatten directory
+          rename -E 's/^mac-(.+?)-apple-darwin$/mac-$1/' mac-*
+          mv manifest-mac.json mac-manifest.json
+          popd
+          rename -E 's/amd64/x86_64/' linux-artifacts/* windows-artifacts/* mac-artifacts/*
+          rename -E 's/x86_64/x64/' linux-artifacts/* windows-artifacts/* mac-artifacts/*
+          rename -E 's/i386/i686/' linux-artifacts/* windows-artifacts/* mac-artifacts/*
+          rename -E 's/i686/x86/' linux-artifacts/* windows-artifacts/* mac-artifacts/*
       - name: Archive build artifacts
         uses: actions/upload-artifact@v2
         with:
@@ -126,6 +162,7 @@ jobs:
           path: |
             linux-artifacts
             windows-artifacts
+            mac-artifacts
       - name: Changelog
         id: Changelog
         uses: metcalfc/changelog-generator@v1.0.0
@@ -144,5 +181,6 @@ jobs:
             linux-artifacts/*.deb
             linux-artifacts/*.rpm
             windows-artifacts/*.msi
+            mac-artifacts/mac-*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
