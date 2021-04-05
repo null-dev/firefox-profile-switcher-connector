@@ -36,12 +36,25 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: linux-artifacts
+          retention-days: 5
           path: |
             target/debian
             target/release/rpmbuild/RPMS
   build-windows:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        target: [
+          i686-pc-windows-msvc,
+          x86_64-pc-windows-msvc,
+        ]
     steps:
+      - name: Setup rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+          override: true
+          default: true
       - name: Install wix packager for cargo
         run: cargo install cargo-wix
 
@@ -58,6 +71,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: windows-artifacts
+          retention-days: 5
           path: |
             target/wix
   release:
