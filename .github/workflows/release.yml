@@ -15,11 +15,22 @@ env:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [
+            i686-unknown-linux-gnu,
+            x86_64-unknown-linux-gnu,
+        ]
     steps:
-      - name: Install rpm packager for cargo
-        run: cargo install cargo-rpm
-      - name: Install deb packager for cargo
-        run: cargo install cargo-deb
+      - name: Setup rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable-${{ matrix.target }}
+          target: ${{ matrix.target }}
+          override: true
+          default: true
+      - name: Install rpm and deb packaging tools
+        run: cargo install cargo-rpm cargo-deb
 
       - uses: actions/checkout@v2
       - name: Build generic Linux binary
@@ -33,7 +44,6 @@ jobs:
         run: cargo test --verbose
       - name: Archive build artifacts
         uses: actions/upload-artifact@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           name: linux-artifacts
           retention-days: 5
@@ -52,7 +62,7 @@ jobs:
       - name: Setup rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: stable-${{ matrix.target }}
           target: ${{ matrix.target }}
           override: true
           default: true
@@ -69,7 +79,6 @@ jobs:
         run: cargo test --verbose
       - name: Archive build artifacts
         uses: actions/upload-artifact@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           name: windows-artifacts
           retention-days: 5
@@ -77,7 +86,6 @@ jobs:
             target/wix
   release:
     needs: [build-linux, build-windows]
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - name: Install utils
@@ -101,15 +109,23 @@ jobs:
           popd
           rename -E 's/amd64/x86_64/' linux-artifacts/* windows-artifacts/*
           rename -E 's/x86_64/x64/' linux-artifacts/* windows-artifacts/*
-      - name: Generate empty package.json for changelog generator
-        run: echo "{}" > package.json
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: release-artifacts
+          retention-days: 5
+          path: |
+            linux-artifacts
+            windows-artifacts
       - name: Changelog
         id: Changelog
         uses: metcalfc/changelog-generator@v1.0.0
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           myToken: ${{ secrets.GITHUB_TOKEN }}
       - name: Release
         uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           body: |
             ${{ steps.Changelog.outputs.changelog }}
