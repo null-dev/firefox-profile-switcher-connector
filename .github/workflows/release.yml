@@ -44,7 +44,7 @@ jobs:
       - name: Package Linux .deb
         run: cargo deb
       - name: Package Linux .rpm
-        run: cargo rpm build -v
+        run: cargo rpm build -v --target ${{ matrix.target }}
 
       - name: Run tests
         run: cargo test --verbose
@@ -55,7 +55,7 @@ jobs:
           retention-days: 5
           path: |
             target/debian
-            target/release/rpmbuild/RPMS
+            target/*/release/rpmbuild/RPMS
   build-windows:
     runs-on: windows-latest
     strategy:
