@@ -116,6 +116,8 @@ jobs:
           popd
           rename -E 's/amd64/x86_64/' linux-artifacts/* windows-artifacts/*
           rename -E 's/x86_64/x64/' linux-artifacts/* windows-artifacts/*
+          rename -E 's/i386/i686/' linux-artifacts/* windows-artifacts/*
+          rename -E 's/i686/x86/' linux-artifacts/* windows-artifacts/*
       - name: Archive build artifacts
         uses: actions/upload-artifact@v2
         with:
