@@ -40,7 +40,7 @@ jobs:
           override: true
           default: true
       - name: Install rpm and deb packaging tools
-        run: cargo install cargo-rpm cargo-deb
+        run: cargo install cargo-rpm cargo-deb --no-default-features
 
       - uses: actions/checkout@v2
       - name: Build generic Linux binary
