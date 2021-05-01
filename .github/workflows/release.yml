@@ -22,6 +22,10 @@ jobs:
             x86_64-unknown-linux-gnu,
         ]
     steps:
+      - name: Install required libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install liblzma-dev -y
       - name: Install 32-bit libraries
         if: matrix.target == 'i686-unknown-linux-gnu'
         run: |
