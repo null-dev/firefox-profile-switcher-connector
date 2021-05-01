@@ -54,6 +54,6 @@ buildflags = ["--release"]
 firefox_profile_switcher_connector = { path = "/usr/bin/ff-pswitch-connector" }
 
 [package.metadata.rpm.files]
-"manifest-linux.json" = { path = "/usr/lib/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json" }
+"../manifest/manifest-linux.json" = { path = "/usr/lib/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json" }
 
 # TODO Strip once https://github.com/rust-lang/rust/issues/72110 is on stable
