@@ -14,7 +14,7 @@ env:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-16.04
     strategy:
       matrix:
         target: [
@@ -57,7 +57,7 @@ jobs:
             target/debian
             target/*/release/rpmbuild/RPMS
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2016
     strategy:
       matrix:
         target: [
