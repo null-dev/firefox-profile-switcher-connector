@@ -1,3 +1,5 @@
+mod options;
+
 extern crate ini;
 extern crate serde;
 extern crate serde_json;
@@ -40,6 +42,9 @@ use std::ops::Add;
 use crate::GetParentProcError::NoCrashReporterEnvVar;
 use std::env::VarError;
 use rand::Rng;
+use serde_json::value::Value::Object;
+use std::hash::Hash;
+use crate::options::{read_global_options, write_global_options};
 
 cfg_if! {
     if #[cfg(target_family = "unix")] {
@@ -87,7 +92,13 @@ struct NativeMessageUpdateProfile {
     profile_id: String,
     name: String,
     avatar: Option<String>,
+    options: HashMap<String, Value>,
     default: bool
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct NativeMessageUpdateOptions {
+    changes: HashMap<String, Value>
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -98,6 +109,7 @@ enum NativeMessage {
     CreateProfile(NativeMessageCreateProfile),
     DeleteProfile(NativeMessageDeleteProfile),
     UpdateProfile(NativeMessageUpdateProfile),
+    UpdateOptions(NativeMessageUpdateOptions),
     CloseManager
 }
 
@@ -183,7 +195,8 @@ struct NativeResponseProfileListProfileEntry {
     id: String,
     name: String,
     default: bool,
-    avatar: Option<String>
+    avatar: Option<String>,
+    options: HashMap<String, Value>
 }
 
 impl NativeResponseProfileListProfileEntry {
@@ -192,7 +205,8 @@ impl NativeResponseProfileListProfileEntry {
             id: entry.id.clone(),
             name: entry.name.clone(),
             default: entry.default,
-            avatar: entry.avatar.clone()
+            avatar: entry.avatar.clone(),
+            options: entry.options.clone()
         }
     }
 }
@@ -211,6 +225,9 @@ enum NativeResponseData {
         profile: NativeResponseProfileListProfileEntry
     },
     ProfileDeleted,
+    OptionsUpdated {
+        options: HashMap<String, Value>
+    },
     ManagerClosed
 }
 
@@ -220,7 +237,8 @@ enum NativeResponseEvent {
     ProfileList { current_profile_id: String, profiles: Vec<NativeResponseProfileListProfileEntry> },
     FocusWindow,
     CloseManager,
-    ConnectorInformation { version: String }
+    ConnectorInformation { version: String },
+    OptionsUpdated { options: HashMap<String, Value> }
 }
 
 fn write_native_response(resp: NativeResponseWrapper) {
@@ -315,7 +333,8 @@ struct ProfileEntry {
     is_relative: bool,
     path: String,
     default: bool,
-    avatar: Option<String>
+    avatar: Option<String>,
+    options: HashMap<String, Value>
 }
 
 impl ProfileEntry {
@@ -335,9 +354,14 @@ struct ProfilesIniState {
     profile_entries: Vec<ProfileEntry>
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct AvatarData {
     avatars: HashMap<String, String>
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct OptionsData {
+    options: HashMap<String, HashMap<String, Value>>
 }
 
 #[derive(Debug)]
@@ -345,11 +369,21 @@ enum ReadProfilesError {
     BadIniFormat,
     IniError(ini::Error),
     AvatarStoreError(io::Error),
-    BadAvatarStoreFormat(serde_json::Error)
+    BadAvatarStoreFormat(serde_json::Error),
+    OptionsStoreError(io::Error),
+    BadOptionsStoreFormat(serde_json::Error)
 }
 
 fn avatar_data_path(config_dir: &Path) -> PathBuf {
     config_dir.join("avatars.json")
+}
+
+fn options_data_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("profile-options.json")
+}
+
+fn global_options_data_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("global-options.json")
 }
 
 fn read_profiles(config: &Config, config_dir: &Path) -> Result<ProfilesIniState, ReadProfilesError> {
@@ -365,6 +399,17 @@ fn read_profiles(config: &Config, config_dir: &Path) -> Result<ProfilesIniState,
         .unwrap_or_else(|e| {
             log::warn!("Failed to read avatar data: {:?}, falling back to defaults", e);
             AvatarData { avatars: HashMap::new() }
+        });
+
+    let options_data: OptionsData = OpenOptions::new()
+        .read(true)
+        .open(options_data_path(config_dir))
+        .map_err(ReadProfilesError::OptionsStoreError)
+        .and_then(|f| serde_json::from_reader(f)
+            .map_err(ReadProfilesError::BadOptionsStoreFormat))
+        .unwrap_or_else(|e| {
+            log::warn!("Failed to read options data: {:?}, falling back to defaults", e);
+            OptionsData { options: HashMap::new() }
         });
 
     let mut state = ProfilesIniState {
@@ -404,6 +449,10 @@ fn read_profiles(config: &Config, config_dir: &Path) -> Result<ProfilesIniState,
             let profile_is_relative = profile_is_relative.unwrap();
             let profile_id = calc_profile_id(&profile_path, profile_is_relative);
             let avatar = avatar_data.avatars.get(&profile_id).map(String::clone);
+            let options = options_data.options
+                .get(&profile_id)
+                .map(HashMap::clone)
+                .unwrap_or_else(HashMap::new);
 
             state.profile_entries.push(ProfileEntry {
                 id: profile_id,
@@ -411,7 +460,8 @@ fn read_profiles(config: &Config, config_dir: &Path) -> Result<ProfilesIniState,
                 is_relative: profile_is_relative,
                 path: profile_path,
                 default: profile_default,
-                avatar
+                avatar,
+                options
             });
         }
     }
@@ -423,17 +473,23 @@ fn read_profiles(config: &Config, config_dir: &Path) -> Result<ProfilesIniState,
 enum WriteProfilesError {
     WriteIniError(Error),
     OpenAvatarFileError(io::Error),
-    WriteAvatarFileError(serde_json::Error)
+    WriteAvatarFileError(serde_json::Error),
+    OpenOptionsFileError(io::Error),
+    WriteOptionsFileError(serde_json::Error)
 }
 fn write_profiles(config: &Config, config_dir: &Path, state: &ProfilesIniState) -> Result<(), WriteProfilesError> {
     // Build avatar data
     let mut avatar_data = AvatarData {
         avatars: HashMap::new()
     };
+    let mut options_data = OptionsData {
+        options: HashMap::new()
+    };
     for profile in &state.profile_entries {
         if let Some(avatar) = &profile.avatar {
             avatar_data.avatars.insert(profile.id.clone(), avatar.clone());
         }
+        options_data.options.insert(profile.id.clone(), profile.options.clone());
     }
 
     // Write avatar data
@@ -446,6 +502,17 @@ fn write_profiles(config: &Config, config_dir: &Path, state: &ProfilesIniState) 
 
     serde_json::to_writer(avatar_file, &avatar_data)
         .map_err(WriteProfilesError::WriteAvatarFileError)?;
+
+    // Write options data
+    let options_file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(options_data_path(config_dir))
+        .map_err(WriteProfilesError::OpenOptionsFileError)?;
+
+    serde_json::to_writer(options_file, &options_data)
+        .map_err(WriteProfilesError::WriteOptionsFileError)?;
 
     // Write profile data
     let mut new_ini = state.backing_ini.clone();
@@ -509,6 +576,7 @@ fn calc_profile_id(path: &str, is_relative: bool) -> String {
 const IPC_CMD_FOCUS_WINDOW: u32 = 1;
 const IPC_CMD_UPDATE_PROFILE_LIST: u32 = 2;
 const IPC_CMD_CLOSE_MANAGER: u32 = 3;
+const IPC_CMD_UPDATE_OPTIONS: u32 = 4;
 fn get_ipc_socket_name(profile_id: &str, reset: bool) -> io::Result<impl ToLocalSocketName<'static>> {
     cfg_if! {
         if #[cfg(target_family = "unix")] {
@@ -640,6 +708,17 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: u32) {
                 resp: NativeResponse::event(NativeResponseEvent::CloseManager)
             });
         }
+        IPC_CMD_UPDATE_OPTIONS => {
+            let new_options = read_global_options(
+                &options_data_path(&app_state.config_dir));
+
+            write_native_response(NativeResponseWrapper {
+                id: NATIVE_RESP_ID_EVENT,
+                resp: NativeResponse::event(NativeResponseEvent::OptionsUpdated {
+                    options: new_options
+                })
+            })
+        }
         _ => {
             log::error!("Unknown IPC command: {}", cmd);
         }
@@ -681,9 +760,16 @@ fn send_ipc_cmd(app_state: &AppState, target_profile_id: &str, cmd: u32) -> std:
 }
 
 // Notify all other running instances to update their profile list
-fn notify_profile_changed(app_state: &AppState, state: &ProfilesIniState) {
-    for profile in &state.profile_entries {
+fn notify_profile_changed(app_state: &AppState, profiles: &ProfilesIniState) {
+    for profile in &profiles.profile_entries {
         send_ipc_cmd(app_state, &profile.id, IPC_CMD_UPDATE_PROFILE_LIST);
+    }
+}
+
+// Notify all other running instances to update their options list
+fn notify_options_changed(app_state: &AppState, profiles: &ProfilesIniState) {
+    for profile in &profiles.profile_entries {
+        send_ipc_cmd(app_state, &profile.id, IPC_CMD_UPDATE_OPTIONS);
     }
 }
 
@@ -915,6 +1001,7 @@ fn process_message(app_state: &mut AppState, msg: NativeMessage) -> NativeRespon
         NativeMessage::CreateProfile(msg) => process_cmd_create_profile(app_state, &mut profiles, msg),
         NativeMessage::DeleteProfile(msg) => process_cmd_delete_profile(app_state, &mut profiles, msg),
         NativeMessage::UpdateProfile(msg) => process_cmd_update_profile(app_state, &mut profiles, msg),
+        NativeMessage::UpdateOptions(msg) => process_cmd_update_options(app_state, &profiles, msg),
         NativeMessage::CloseManager => process_cmd_close_manager(app_state, &profiles)
     }
 }
@@ -1135,7 +1222,8 @@ fn process_cmd_create_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
         is_relative: true,
         path: new_profile_path,
         default: false,
-        avatar: Some(msg.avatar)
+        avatar: Some(msg.avatar),
+        options: HashMap::new()
     };
 
     // Firefox will refuse to launch if we do not mkdirs the new profile folder
@@ -1225,7 +1313,8 @@ fn process_cmd_create_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
         id: new_profile.id.clone(),
         name: new_profile.name.clone(),
         default: new_profile.default,
-        avatar: new_profile.avatar.clone()
+        avatar: new_profile.avatar.clone(),
+        options: new_profile.options.clone()
     };
     profiles.profile_entries.push(new_profile);
 
@@ -1299,6 +1388,7 @@ fn process_cmd_update_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
 
     profile.name = msg.name;
     profile.avatar = msg.avatar;
+    profile.options = msg.options;
 
     if msg.default {
         profile.default = true
@@ -1308,7 +1398,8 @@ fn process_cmd_update_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
         id: msg.profile_id.clone(),
         name: profile.name.clone(),
         default: profile.default,
-        avatar: profile.avatar.clone()
+        avatar: profile.avatar.clone(),
+        options: profile.options.clone()
     };
 
     if msg.default {
@@ -1325,6 +1416,24 @@ fn process_cmd_update_profile(app_state: &AppState, profiles: &mut ProfilesIniSt
     notify_profile_changed(app_state, profiles);
 
     return NativeResponse::success(NativeResponseData::ProfileUpdated { profile: resp })
+}
+
+fn process_cmd_update_options(app_state: &AppState,
+                              profiles: &ProfilesIniState,
+                              msg: NativeMessageUpdateOptions) -> NativeResponse {
+    let options_data_path = global_options_data_path(&app_state.config_dir);
+    let mut options = read_global_options(&options_data_path);
+
+    for change in msg.changes {
+        options.insert(change.0, change.1);
+    }
+
+    if let Err(e) = write_global_options(&options_data_path, &options) {
+        return NativeResponse::error_with_dbg_msg("Failed to save new changes!", e);
+    }
+    notify_options_changed(app_state, profiles);
+
+    return NativeResponse::success(NativeResponseData::OptionsUpdated { options })
 }
 
 fn process_cmd_close_manager(app_state: &AppState, profiles: &ProfilesIniState) -> NativeResponse {
