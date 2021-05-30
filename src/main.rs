@@ -12,6 +12,8 @@ extern crate interprocess;
 extern crate fern;
 extern crate log;
 extern crate url;
+extern crate chrono;
+extern crate rand;
 
 use std::path::{PathBuf, Path};
 use ini::Ini;
@@ -37,6 +39,7 @@ use serde_json::Value;
 use std::ops::Add;
 use crate::GetParentProcError::NoCrashReporterEnvVar;
 use std::env::VarError;
+use rand::Rng;
 
 cfg_if! {
     if #[cfg(target_family = "unix")] {
@@ -57,29 +60,29 @@ cfg_if! {
 const APP_VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 // === NATIVE REQUEST ===
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct NativeMessageInitialize {
     extension_id: String,
     profile_id: Option<String>
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct NativeMessageLaunchProfile {
     profile_id: String
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct NativeMessageCreateProfile {
     name: String,
     avatar: String
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct NativeMessageDeleteProfile {
     profile_id: String
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct NativeMessageUpdateProfile {
     profile_id: String,
     name: String,
@@ -87,7 +90,7 @@ struct NativeMessageUpdateProfile {
     default: bool
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "command")]
 enum NativeMessage {
     Initialize(NativeMessageInitialize),
@@ -98,7 +101,7 @@ enum NativeMessage {
     CloseManager
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct NativeMessageWrapper {
     id: i64,
     msg: NativeMessage
@@ -118,7 +121,7 @@ fn read_incoming_message(input: &mut impl Read) -> NativeMessageWrapper {
 
 // === NATIVE RESPONSE ===
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(untagged)]
 enum NativeResponse {
     Error {
@@ -175,7 +178,7 @@ impl NativeResponse {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct NativeResponseProfileListProfileEntry {
     id: String,
     name: String,
@@ -194,7 +197,7 @@ impl NativeResponseProfileListProfileEntry {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(untagged)]
 enum NativeResponseData {
     Initialized {
@@ -211,7 +214,7 @@ enum NativeResponseData {
     ManagerClosed
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(tag = "event")]
 enum NativeResponseEvent {
     ProfileList { current_profile_id: String, profiles: Vec<NativeResponseProfileListProfileEntry> },
@@ -232,7 +235,7 @@ fn write_native_response(resp: NativeResponseWrapper) {
 
 // === CONFIG ===
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct Config {
     browser_profile_dir: PathBuf
 }
@@ -284,7 +287,7 @@ impl Default for Config {
 }
 
 // This is the application state, it will be immutable through the life of the application
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct AppState {
     config: Config,
     first_run: bool,
@@ -525,9 +528,8 @@ fn get_ipc_socket_name(profile_id: &str, reset: bool) -> io::Result<impl ToLocal
 
 fn handle_conn(app_state: &AppState, mut conn: LocalSocketStream) {
     // Write version
-    if let Err(e) = conn.write_u8(0) {
+    if let Err(e) = conn.write_u8(0).and_then(|_| conn.flush()) {
         match e.kind() {
-            io::ErrorKind::WriteZero => {}
             _ => log::error!("IPC error while writing version: {:?}", e)
         }
         return
@@ -540,6 +542,7 @@ fn handle_conn(app_state: &AppState, mut conn: LocalSocketStream) {
             Err(e) => {
                 match e.kind() {
                     io::ErrorKind::UnexpectedEof => {}
+                    io::ErrorKind::ConnectionAborted => {}
                     _ => log::error!("IPC error while reading command: {:?}", e)
                 }
                 return
@@ -562,9 +565,8 @@ fn handle_conn(app_state: &AppState, mut conn: LocalSocketStream) {
 
         // TODO Write different status if command failed
         // Write command status
-        if let Err(e) = conn.write_i32::<NetworkEndian>(0) {
+        if let Err(e) = conn.write_i32::<NetworkEndian>(0).and_then(|_| conn.flush()) {
             match e.kind() {
-                io::ErrorKind::WriteZero => {}
                 _ => log::error!("IPC error while writing command status: {:?}", e)
             }
             return
@@ -573,12 +575,14 @@ fn handle_conn(app_state: &AppState, mut conn: LocalSocketStream) {
 }
 
 fn setup_ipc(cur_profile_id: &str, app_state: &AppState) -> std::result::Result<(), io::Error> {
+    log::trace!("Starting IPC server...");
     let socket_name = get_ipc_socket_name(cur_profile_id, true)?;
 
     let listener = LocalSocketListener::bind(socket_name)?;
     for mut conn in listener.incoming() {
         match conn {
             Ok(stream) => {
+                log::trace!("Incoming IPC connection.");
                 let app_state = app_state.clone();
                 thread::spawn(move || handle_conn(&app_state, stream));
             }
@@ -592,6 +596,7 @@ fn setup_ipc(cur_profile_id: &str, app_state: &AppState) -> std::result::Result<
 }
 
 fn handle_ipc_cmd(app_state: &AppState, cmd: u32) {
+    log::trace!("Executing IPC command: {}", cmd);
     match cmd {
         IPC_CMD_FOCUS_WINDOW => {
             // Focus window
@@ -636,21 +641,35 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: u32) {
 #[derive(Debug)]
 enum IpcError {
     NotRunning,
+    BadStatus,
     IoError(io::Error)
 }
 
 fn send_ipc_cmd(app_state: &AppState, target_profile_id: &str, cmd: u32) -> std::result::Result<(), IpcError> {
+    log::trace!("Sending IPC command {} to profile: {}", cmd, target_profile_id);
     let cur_profile_id = &app_state.cur_profile_id;
     if cur_profile_id.is_some() && cur_profile_id.as_ref().unwrap() == target_profile_id {
+        log::trace!("Fast-pathing IPC command...");
         handle_ipc_cmd(app_state, cmd);
+        Ok(())
     } else {
         let socket_name = get_ipc_socket_name(target_profile_id, false)
             .map_err(|e| {IpcError::IoError(e)})?;
 
         let mut conn = LocalSocketStream::connect(socket_name).map_err(|e| {IpcError::IoError(e)})?;
-        conn.write_u32::<NetworkEndian>(cmd).map_err(|e| {IpcError::IoError(e)})?;
+        log::trace!("Connected to IPC target, reading remote version...");
+        let remote_version = conn.read_u8().map_err(|e| {IpcError::IoError(e)})?;
+        log::trace!("Remote version is: {}, Writing IPC command...", remote_version);
+        conn.write_u32::<NetworkEndian>(cmd).and_then(|_| conn.flush()).map_err(|e| {IpcError::IoError(e)})?;
+        log::trace!("IPC command written, reading status...");
+        let status = conn.read_i32::<NetworkEndian>().map_err(|e| {IpcError::IoError(e)})?;
+        log::trace!("IPC command status is: {}", status);
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(IpcError::BadStatus)
+        }
     }
-    Ok(())
 }
 
 // Notify all other running instances to update their profile list
@@ -718,13 +737,39 @@ fn main() {
     fs::create_dir_all(pref_dir);
     fs::create_dir_all(data_dir);
 
+    // Enable full logging when debugging is enabled
+    let log_level = if data_dir.join("DEBUG").exists() {
+        log::LevelFilter::Trace
+    } else {
+        log::LevelFilter::Warn
+    };
+
+    // Use to keep track of instances through a log session
+    let instance_key: String = rand::thread_rng()
+        .sample_iter(&rand::distributions::Alphanumeric)
+        .take(6)
+        .map(char::from)
+        .collect();
+
     // Setup logging
     fern::Dispatch::new()
-        .level(log::LevelFilter::Trace)
+        .level(log_level)
         .chain(fern::log_file(data_dir.join("log.txt"))
             .expect("Unable to open logfile!"))
+        .format(move |out, message, record| {
+            out.finish(format_args!(
+                "[{}]{}[{}][{}] {}",
+                instance_key,
+                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
+                record.target(),
+                record.level(),
+                message
+            ))
+        })
         .apply()
         .expect("Failed to setup logging!");
+
+    log::trace!("Finished setup logging (app version: {}).", APP_VERSION);
 
     // Find extension ID
     let args: Vec<String> = env::args().collect();
@@ -733,9 +778,13 @@ fn main() {
         log::warn!("Could not determine extension ID!");
     }
 
+    log::trace!("Extension id: {}", extension_id.unwrap());
+
     // Read configuration
     let config_path = pref_dir.join("config.json");
     let config = read_configuration(&config_path);
+
+    log::trace!("Configuration loaded: {:?}", &config);
 
     // Calculate current profile location
     // TODO This is unreliable on Windows as this env var is not always set to the correct dir
@@ -794,6 +843,8 @@ fn main() {
         data_dir: data_dir.to_path_buf()
     };
 
+    log::trace!("Entering main loop, initial application state: {:?}", &app_state);
+
     let mut using_debug = false; // TODO DEBUG STUFF
     loop {
         let message = match env::var(DEBUG_ENV_VAR_INPUT_FILE) {
@@ -807,6 +858,8 @@ fn main() {
             }
             Err(_) => read_incoming_message(&mut io::stdin())
         };
+
+        log::trace!("Received message, processing: {:?}", &message);
 
         /*
         // TODO Lock SI when updating profile list over IPC
@@ -825,10 +878,14 @@ fn main() {
 
         let response = process_message(&mut app_state, message.msg);
 
+        log::trace!("Message {} processed, response is: {:?}", &message.id, &response);
+
         write_native_response(NativeResponseWrapper {
             id: message.id,
             resp: response
         });
+
+        log::trace!("Response written for message {}, waiting for next message.", &message.id);
 
         if using_debug { break } // TODO DEBUG STUFF
     }
@@ -841,6 +898,8 @@ fn process_message(app_state: &mut AppState, msg: NativeMessage) -> NativeRespon
             return NativeResponse::error_with_dbg_msg("Failed to load profile list.", e);
         }
     };
+
+    log::trace!("Profile list processed!");
 
     match msg {
         NativeMessage::Initialize(msg) => process_cmd_initialize(app_state, &mut profiles, msg),
@@ -857,11 +916,13 @@ fn process_cmd_initialize(app_state: &mut AppState,
                           profiles: &mut ProfilesIniState,
                           msg: NativeMessageInitialize) -> NativeResponse {
     if let Some(profile_id) = &msg.profile_id {
+        log::trace!("Profile ID was provided by extension: {}", profile_id);
         finish_init(app_state, profiles, profile_id);
         return NativeResponse::success(NativeResponseData::Initialized { cached: true })
     }
 
     // Extension didn't tell us profile id so we have to determine it
+    log::trace!("Profile ID was not provided by extension, determining using ext id ({})", msg.extension_id);
 
     // Search every profile
     for profile in &profiles.profile_entries {
@@ -882,6 +943,7 @@ fn process_cmd_initialize(app_state: &mut AppState,
 
         if ext_installed {
             let profile_id = profile.id.clone();
+            log::trace!("Profile ID determined: {}", profile_id);
             finish_init(app_state, profiles, &profile_id);
             return NativeResponse::success(NativeResponseData::Initialized { cached: false })
         }
@@ -895,6 +957,7 @@ fn finish_init(app_state: &mut AppState, profiles: &mut ProfilesIniState, profil
 
     if app_state.first_run {
         app_state.first_run = false;
+        log::trace!("First run!");
 
         match profiles.profile_entries.iter_mut().find(|p| p.id == profile_id) {
             Some(profile) => {
@@ -942,9 +1005,11 @@ fn process_cmd_launch_profile(app_state: &AppState,
         None => return NativeResponse::error("No profile with the specified id could be found!")
     };
 
+    log::trace!("Launching profile: {}", profile.id);
+
     match send_ipc_cmd(app_state, &msg.profile_id, IPC_CMD_FOCUS_WINDOW) {
         Ok(_) => { return NativeResponse::success(NativeResponseData::ProfileLaunched); }
-        Err(e) => { log::warn!("Failed to focus current browser window, launching new window: {:?}", e); }
+        Err(e) => { log::info!("Failed to focus current browser window, launching new window: {:?}", e); }
     }
 
     let parent_proc = match get_parent_proc_path() {
@@ -964,6 +1029,8 @@ fn process_cmd_launch_profile(app_state: &AppState,
         Ok(_) => NativeResponse::success(NativeResponseData::ProfileLaunched),
         Err(e) => NativeResponse::error_with_dbg_msg("Failed to launch browser with new profile!", e)
     };*/
+
+    log::trace!("Browser binary found: {:?}", parent_proc);
 
     cfg_if! {
         if #[cfg(target_family = "unix")] {
