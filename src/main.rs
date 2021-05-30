@@ -584,7 +584,15 @@ fn setup_ipc(cur_profile_id: &str, app_state: &AppState) -> std::result::Result<
             Ok(stream) => {
                 log::trace!("Incoming IPC connection.");
                 let app_state = app_state.clone();
-                thread::spawn(move || handle_conn(&app_state, stream));
+
+                // Windows seems to have trouble with multiple threads and named pipes :(
+                cfg_if! {
+                    if #[cfg(target_family = "windows")] {
+                        handle_conn(&app_state, stream);
+                    } else {
+                        thread::spawn(move || handle_conn(&app_state, stream));
+                    }
+                }
             }
             Err(e) => {
                 log::error!("Incoming IPC connection failure: {:?}", e);
