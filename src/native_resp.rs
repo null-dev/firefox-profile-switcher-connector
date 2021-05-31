@@ -33,6 +33,15 @@ pub struct NativeResponseWrapper {
     pub resp: NativeResponse
 }
 
+impl NativeResponseWrapper {
+    fn event(event: NativeResponseEvent) -> NativeResponseWrapper {
+        NativeResponseWrapper {
+            id: NATIVE_RESP_ID_EVENT,
+            resp: NativeResponse::event(event)
+        }
+    }
+}
+
 impl NativeResponse {
     pub fn error(msg: &str) -> NativeResponse {
         NativeResponse::Error {
@@ -61,7 +70,7 @@ impl NativeResponse {
             data
         }
     }
-    pub fn event(event: NativeResponseEvent) -> NativeResponse {
+    fn event(event: NativeResponseEvent) -> NativeResponse {
         NativeResponse::Event(event)
     }
 }
@@ -127,3 +136,6 @@ pub fn write_native_response(resp: NativeResponseWrapper) {
     handle.flush();
 }
 
+pub fn write_native_event(resp: NativeResponseEvent) {
+    write_native_response(NativeResponseWrapper::event(resp));
+}

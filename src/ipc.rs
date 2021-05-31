@@ -4,9 +4,9 @@ use crate::state::AppState;
 use byteorder::{WriteBytesExt, NetworkEndian, ReadBytesExt};
 use std::io::{Write, Read, BufReader, BufWriter};
 use std::path::PathBuf;
-use crate::native_resp::{write_native_response, NativeResponseWrapper, NATIVE_RESP_ID_EVENT, NativeResponse, NativeResponseEvent, NativeResponseProfileListProfileEntry};
+use crate::native_resp::{write_native_response, NativeResponseWrapper, NATIVE_RESP_ID_EVENT, NativeResponse, NativeResponseEvent, NativeResponseProfileListProfileEntry, write_native_event};
 use crate::profiles::{read_profiles, ProfilesIniState};
-use crate::options::read_global_options;
+use crate::options::{read_global_options, native_notify_updated_options};
 use crate::storage::options_data_path;
 use cfg_if::cfg_if;
 use serde::{Serialize, Deserialize};
@@ -108,11 +108,8 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: IPCCommand) {
     match cmd {
         IPCCommand::FocusWindow(options) => {
             // Focus window
-            write_native_response(NativeResponseWrapper {
-                id: NATIVE_RESP_ID_EVENT,
-                resp: NativeResponse::event(NativeResponseEvent::FocusWindow {
-                    url: options.url
-                })
+            write_native_event(NativeResponseEvent::FocusWindow {
+                url: options.url
             });
         }
         IPCCommand::UpdateProfileList => {
@@ -122,12 +119,9 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: IPCCommand) {
                         .as_ref()
                         .map(|it| it.clone()) {
                         // Notify updated profile list
-                        write_native_response(NativeResponseWrapper {
-                            id: NATIVE_RESP_ID_EVENT,
-                            resp: NativeResponse::event(NativeResponseEvent::ProfileList {
-                                current_profile_id: pid.to_owned(),
-                                profiles: profiles.profile_entries.iter().map(NativeResponseProfileListProfileEntry::from_profile_entry).collect()
-                            })
+                        write_native_event(NativeResponseEvent::ProfileList {
+                            current_profile_id: pid.to_owned(),
+                            profiles: profiles.profile_entries.iter().map(NativeResponseProfileListProfileEntry::from_profile_entry).collect()
                         });
                     }
                 },
@@ -137,21 +131,10 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: IPCCommand) {
             };
         }
         IPCCommand::CloseManager => {
-            write_native_response(NativeResponseWrapper {
-                id: NATIVE_RESP_ID_EVENT,
-                resp: NativeResponse::event(NativeResponseEvent::CloseManager)
-            });
+            write_native_event(NativeResponseEvent::CloseManager);
         }
         IPCCommand::UpdateOptions => {
-            let new_options = read_global_options(
-                &options_data_path(&app_state.config_dir));
-
-            write_native_response(NativeResponseWrapper {
-                id: NATIVE_RESP_ID_EVENT,
-                resp: NativeResponse::event(NativeResponseEvent::OptionsUpdated {
-                    options: new_options
-                })
-            })
+            native_notify_updated_options(app_state);
         }
     }
 }

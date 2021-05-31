@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use serde_json::Value;
 use std::fs::OpenOptions;
 use std::io;
+use crate::storage::options_data_path;
+use crate::native_resp::{write_native_response, NativeResponseWrapper, write_native_event, NativeResponseEvent};
+use crate::state::AppState;
 
 // === GLOBAL OPTIONS ===
 
@@ -35,4 +38,13 @@ pub fn write_global_options(path: &PathBuf, new_options: &HashMap<String, Value>
 
     serde_json::to_writer(options_file, &new_options)
         .map_err(WriteGlobalOptionsError::WriteFileError)
+}
+
+pub fn native_notify_updated_options(app_state: &AppState) {
+    let new_options = read_global_options(
+        &options_data_path(&app_state.config_dir));
+
+    write_native_event(NativeResponseEvent::OptionsUpdated {
+        options: new_options
+    });
 }

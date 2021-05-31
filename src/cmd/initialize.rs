@@ -1,9 +1,10 @@
 use crate::state::AppState;
 use crate::profiles::{ProfilesIniState, write_profiles};
 use crate::native_req::NativeMessageInitialize;
-use crate::native_resp::{NativeResponse, NativeResponseData, write_native_response, NativeResponseWrapper, NATIVE_RESP_ID_EVENT, NativeResponseEvent, NativeResponseProfileListProfileEntry};
+use crate::native_resp::{NativeResponse, NativeResponseData, write_native_response, NativeResponseWrapper, NATIVE_RESP_ID_EVENT, NativeResponseEvent, NativeResponseProfileListProfileEntry, write_native_event};
 use std::{thread, fs};
 use crate::ipc::setup_ipc;
+use crate::options::native_notify_updated_options;
 
 pub fn process_cmd_initialize(app_state: &mut AppState,
                               profiles: &mut ProfilesIniState,
@@ -69,13 +70,13 @@ fn finish_init(app_state: &mut AppState, profiles: &mut ProfilesIniState, profil
     }
 
     // Notify extension of new profile list
-    write_native_response(NativeResponseWrapper {
-        id: NATIVE_RESP_ID_EVENT,
-        resp: NativeResponse::event(NativeResponseEvent::ProfileList {
-            current_profile_id: profile_id.to_owned(),
-            profiles: profiles.profile_entries.iter().map(NativeResponseProfileListProfileEntry::from_profile_entry).collect()
-        })
+    write_native_event(NativeResponseEvent::ProfileList {
+        current_profile_id: profile_id.to_owned(),
+        profiles: profiles.profile_entries.iter().map(NativeResponseProfileListProfileEntry::from_profile_entry).collect()
     });
+
+    // Notify extension of current options
+    native_notify_updated_options(app_state);
 
     // Begin IPC
     {

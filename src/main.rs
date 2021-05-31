@@ -32,7 +32,7 @@ use rand::Rng;
 use crate::config::{read_configuration};
 use crate::profiles::read_profiles;
 use crate::state::AppState;
-use crate::native_resp::{NativeResponseEvent, write_native_response, NativeResponseWrapper, NATIVE_RESP_ID_EVENT, NativeResponse};
+use crate::native_resp::{NativeResponseEvent, write_native_response, NativeResponseWrapper, NATIVE_RESP_ID_EVENT, NativeResponse, write_native_event};
 use crate::cmd::execute_cmd_for_message;
 use crate::native_req::{read_incoming_message, NativeMessage};
 
@@ -58,11 +58,8 @@ mod state {
 
 fn main() {
     // Notify extension of our version
-    write_native_response(NativeResponseWrapper {
-        id: NATIVE_RESP_ID_EVENT,
-        resp: NativeResponse::event(NativeResponseEvent::ConnectorInformation {
-            version: APP_VERSION.to_string()
-        })
+    write_native_event(NativeResponseEvent::ConnectorInformation {
+        version: APP_VERSION.to_string()
     });
 
     // Calculate storage dirs
