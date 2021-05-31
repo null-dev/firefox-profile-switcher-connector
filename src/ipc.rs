@@ -51,25 +51,25 @@ fn handle_conn(app_state: &AppState, mut conn: LocalSocketStream) {
         return
     }
 
-    loop {
-        // Read command
-        let mut deserializer = serde_cbor::Deserializer::from_reader(&mut conn);
-        match IPCCommand::deserialize(&mut deserializer) {
-            Ok(command) => handle_ipc_cmd(app_state, command),
-            Err(e) => {
-                log::error!("Failed to read command from IPC: {:?}", e);
-                return
-            }
-        }
+    // We no longer attempt to read multiple messages on a connection, blame Windows...
 
-        // TODO Write different status if command failed
-        // Write command status
-        if let Err(e) = conn.write_i32::<NetworkEndian>(0).and_then(|_| conn.flush()) {
-            match e.kind() {
-                _ => log::error!("IPC error while writing command status: {:?}", e)
-            }
+    // Read command
+    let mut deserializer = serde_cbor::Deserializer::from_reader(&mut conn);
+    match IPCCommand::deserialize(&mut deserializer) {
+        Ok(command) => handle_ipc_cmd(app_state, command),
+        Err(e) => {
+            log::error!("Failed to read command from IPC: {:?}", e);
             return
         }
+    }
+
+    // TODO Write different status if command failed
+    // Write command status
+    if let Err(e) = conn.write_i32::<NetworkEndian>(0).and_then(|_| conn.flush()) {
+        match e.kind() {
+            _ => log::error!("IPC error while writing command status: {:?}", e)
+        }
+        return
     }
 }
 
