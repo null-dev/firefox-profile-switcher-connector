@@ -70,7 +70,7 @@ pub fn process_cmd_create_profile(app_state: &AppState, profiles: &mut ProfilesI
         path: new_profile_path,
         default: false,
         avatar: Some(msg.avatar),
-        options: HashMap::new()
+        options: msg.options
     };
 
     // Firefox will refuse to launch if we do not mkdirs the new profile folder

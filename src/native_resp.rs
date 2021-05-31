@@ -111,7 +111,7 @@ pub enum NativeResponseData {
 #[serde(tag = "event")]
 pub enum NativeResponseEvent {
     ProfileList { current_profile_id: String, profiles: Vec<NativeResponseProfileListProfileEntry> },
-    FocusWindow,
+    FocusWindow { url: Option<String> },
     CloseManager,
     ConnectorInformation { version: String },
     OptionsUpdated { options: HashMap<String, Value> }

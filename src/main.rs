@@ -23,6 +23,7 @@ extern crate log;
 extern crate url;
 extern crate chrono;
 extern crate rand;
+extern crate serde_cbor;
 
 use std::{io, env};
 use std::fs;

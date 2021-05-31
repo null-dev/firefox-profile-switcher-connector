@@ -2,13 +2,13 @@ use crate::state::AppState;
 use crate::profiles::ProfilesIniState;
 use crate::native_req::NativeMessageLaunchProfile;
 use crate::native_resp::{NativeResponse, NativeResponseData};
-use crate::ipc::{IPC_CMD_FOCUS_WINDOW, send_ipc_cmd};
 use std::path::PathBuf;
 use std::{io, env};
 use std::process::{exit, Child, Command, Stdio};
 use std::env::VarError;
 use cfg_if::cfg_if;
 use crate::cmd::launch_profile::GetParentProcError::NoCrashReporterEnvVar;
+use crate::ipc::notify_focus_window;
 
 cfg_if! {
     if #[cfg(target_family = "unix")] {
@@ -37,7 +37,7 @@ pub fn process_cmd_launch_profile(app_state: &AppState,
 
     log::trace!("Launching profile: {}", profile.id);
 
-    match send_ipc_cmd(app_state, &msg.profile_id, IPC_CMD_FOCUS_WINDOW) {
+    match notify_focus_window(app_state, &msg.profile_id, msg.url.clone()) {
         Ok(_) => { return NativeResponse::success(NativeResponseData::ProfileLaunched); }
         Err(e) => { log::info!("Failed to focus current browser window, launching new window: {:?}", e); }
     }
@@ -74,7 +74,7 @@ pub fn process_cmd_launch_profile(app_state: &AppState,
                             libc::close(1);
                             libc::close(2);
                         }*/
-                        match spawn_browser_proc(&parent_proc, &profile.name) {
+                        match spawn_browser_proc(&parent_proc, &profile.name, msg.url) {
                             Ok(_) => 0,
                             Err(e) => 1
                         }
@@ -85,7 +85,7 @@ pub fn process_cmd_launch_profile(app_state: &AppState,
             }
         } else if #[cfg(target_family = "windows")] {
             // TODO Change app ID to separate on taskbar?
-            match spawn_browser_proc(&parent_proc, &profile.name) {
+            match spawn_browser_proc(&parent_proc, &profile.name, msg.url) {
                 Ok(_) => NativeResponse::success(NativeResponseData::ProfileLaunched),
                 Err(e) => NativeResponse::error_with_dbg_msg("Failed to launch browser with new profile!", e)
             }
@@ -97,16 +97,22 @@ pub fn process_cmd_launch_profile(app_state: &AppState,
 
 // === PROCESS UTILS ===
 
-fn spawn_browser_proc(bin_path: &PathBuf, profile_name: &str) -> io::Result<Child> {
+fn spawn_browser_proc(bin_path: &PathBuf, profile_name: &str, url: Option<String>) -> io::Result<Child> {
     let mut command = Command::new(bin_path);
     cfg_if! {
         if #[cfg(target_family = "windows")] {
             command.creation_flags((winapi::um::winbase::DETACHED_PROCESS | winapi::um::winbase::CREATE_BREAKAWAY_FROM_JOB) as u32);
         }
     }
-    return command
+    command
         .arg("-P")
-        .arg(profile_name)
+        .arg(profile_name);
+    if let Some(url) = url {
+        command
+            .arg("--new-tab")
+            .arg(url);
+    }
+    return command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

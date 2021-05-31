@@ -13,13 +13,15 @@ pub struct NativeMessageInitialize {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct NativeMessageLaunchProfile {
-    pub profile_id: String
+    pub profile_id: String,
+    pub url: Option<String>
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct NativeMessageCreateProfile {
     pub name: String,
-    pub avatar: String
+    pub avatar: String,
+    pub options: HashMap<String, Value>
 }
 
 #[derive(Serialize, Deserialize, Debug)]

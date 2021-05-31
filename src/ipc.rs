@@ -2,19 +2,29 @@ use interprocess::local_socket::{ToLocalSocketName, LocalSocketStream, LocalSock
 use std::{io, fs, thread};
 use crate::state::AppState;
 use byteorder::{WriteBytesExt, NetworkEndian, ReadBytesExt};
-use std::io::Write;
+use std::io::{Write, Read, BufReader, BufWriter};
 use std::path::PathBuf;
 use crate::native_resp::{write_native_response, NativeResponseWrapper, NATIVE_RESP_ID_EVENT, NativeResponse, NativeResponseEvent, NativeResponseProfileListProfileEntry};
 use crate::profiles::{read_profiles, ProfilesIniState};
 use crate::options::read_global_options;
 use crate::storage::options_data_path;
 use cfg_if::cfg_if;
+use serde::{Serialize, Deserialize};
+use serde_json::value::Serializer;
 
 // === IPC ===
-pub const IPC_CMD_FOCUS_WINDOW: u32 = 1;
-const IPC_CMD_UPDATE_PROFILE_LIST: u32 = 2;
-pub const IPC_CMD_CLOSE_MANAGER: u32 = 3;
-const IPC_CMD_UPDATE_OPTIONS: u32 = 4;
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "t", content = "c")]
+enum IPCCommand {
+    FocusWindow(FocusWindowCommand),
+    UpdateProfileList,
+    CloseManager,
+    UpdateOptions
+}
+#[derive(Serialize, Deserialize, Debug)]
+struct FocusWindowCommand {
+    url: Option<String>
+}
 fn get_ipc_socket_name(profile_id: &str, reset: bool) -> io::Result<impl ToLocalSocketName<'static>> {
     cfg_if! {
         if #[cfg(target_family = "unix")] {
@@ -43,31 +53,14 @@ fn handle_conn(app_state: &AppState, mut conn: LocalSocketStream) {
 
     loop {
         // Read command
-        let command = match conn.read_u32::<NetworkEndian>() {
-            Ok(c) => c,
+        let mut deserializer = serde_cbor::Deserializer::from_reader(&mut conn);
+        match IPCCommand::deserialize(&mut deserializer) {
+            Ok(command) => handle_ipc_cmd(app_state, command),
             Err(e) => {
-                match e.kind() {
-                    io::ErrorKind::UnexpectedEof => {}
-                    io::ErrorKind::ConnectionAborted => {}
-                    _ => log::error!("IPC error while reading command: {:?}", e)
-                }
+                log::error!("Failed to read command from IPC: {:?}", e);
                 return
             }
-        };
-
-        // Read command length
-        /*let len = match conn.read_u64() {
-            Ok(c) => c,
-            Err(e) => {
-                match e.kind() {
-                    io::ErrorKind::UnexpectedEof => {}
-                    _ => log::error!("IPC error while reading command length: {:?}", e)
-                }
-                return
-            }
-        };*/
-
-        handle_ipc_cmd(app_state, command);
+        }
 
         // TODO Write different status if command failed
         // Write command status
@@ -109,17 +102,20 @@ pub fn setup_ipc(cur_profile_id: &str, app_state: &AppState) -> std::result::Res
     return Ok(());
 }
 
-fn handle_ipc_cmd(app_state: &AppState, cmd: u32) {
-    log::trace!("Executing IPC command: {}", cmd);
+fn handle_ipc_cmd(app_state: &AppState, cmd: IPCCommand) {
+    log::trace!("Executing IPC command: {:?}", cmd);
+
     match cmd {
-        IPC_CMD_FOCUS_WINDOW => {
+        IPCCommand::FocusWindow(options) => {
             // Focus window
             write_native_response(NativeResponseWrapper {
                 id: NATIVE_RESP_ID_EVENT,
-                resp: NativeResponse::event(NativeResponseEvent::FocusWindow)
+                resp: NativeResponse::event(NativeResponseEvent::FocusWindow {
+                    url: options.url
+                })
             });
         }
-        IPC_CMD_UPDATE_PROFILE_LIST => {
+        IPCCommand::UpdateProfileList => {
             match read_profiles(&app_state.config, &app_state.config_dir) {
                 Ok(profiles) => {
                     if let Some(pid) = &app_state.cur_profile_id
@@ -140,13 +136,13 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: u32) {
                 }
             };
         }
-        IPC_CMD_CLOSE_MANAGER => {
+        IPCCommand::CloseManager => {
             write_native_response(NativeResponseWrapper {
                 id: NATIVE_RESP_ID_EVENT,
                 resp: NativeResponse::event(NativeResponseEvent::CloseManager)
             });
         }
-        IPC_CMD_UPDATE_OPTIONS => {
+        IPCCommand::UpdateOptions => {
             let new_options = read_global_options(
                 &options_data_path(&app_state.config_dir));
 
@@ -157,9 +153,6 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: u32) {
                 })
             })
         }
-        _ => {
-            log::error!("Unknown IPC command: {}", cmd);
-        }
     }
 }
 
@@ -167,11 +160,12 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: u32) {
 pub enum IpcError {
     NotRunning,
     BadStatus,
+    SerializationError(serde_cbor::Error),
     IoError(io::Error)
 }
 
-pub fn send_ipc_cmd(app_state: &AppState, target_profile_id: &str, cmd: u32) -> std::result::Result<(), IpcError> {
-    log::trace!("Sending IPC command {} to profile: {}", cmd, target_profile_id);
+fn send_ipc_cmd(app_state: &AppState, target_profile_id: &str, cmd: IPCCommand) -> std::result::Result<(), IpcError> {
+    log::trace!("Sending IPC command {:?} to profile: {}", cmd, target_profile_id);
     let cur_profile_id = &app_state.cur_profile_id;
     if cur_profile_id.is_some() && cur_profile_id.as_ref().unwrap() == target_profile_id {
         log::trace!("Fast-pathing IPC command...");
@@ -185,7 +179,10 @@ pub fn send_ipc_cmd(app_state: &AppState, target_profile_id: &str, cmd: u32) -> 
         log::trace!("Connected to IPC target, reading remote version...");
         let remote_version = conn.read_u8().map_err(|e| {IpcError::IoError(e)})?;
         log::trace!("Remote version is: {}, Writing IPC command...", remote_version);
-        conn.write_u32::<NetworkEndian>(cmd).and_then(|_| conn.flush()).map_err(|e| {IpcError::IoError(e)})?;
+        serde_cbor::to_writer(&mut conn, &cmd)
+            .map_err(IpcError::SerializationError)
+            .and_then(|_| conn.flush()
+                .map_err(IpcError::IoError))?;
         log::trace!("IPC command written, reading status...");
         let status = conn.read_i32::<NetworkEndian>().map_err(|e| {IpcError::IoError(e)})?;
         log::trace!("IPC command status is: {}", status);
@@ -197,16 +194,32 @@ pub fn send_ipc_cmd(app_state: &AppState, target_profile_id: &str, cmd: u32) -> 
     }
 }
 
+// Notify another instance to focus it's window
+pub fn notify_focus_window(app_state: &AppState, target_profile_id: &String, url: Option<String>) -> Result<(), IpcError> {
+    send_ipc_cmd(app_state, target_profile_id, IPCCommand::FocusWindow(FocusWindowCommand {
+        url
+    }))
+}
+
 // Notify all other running instances to update their profile list
 pub fn notify_profile_changed(app_state: &AppState, profiles: &ProfilesIniState) {
     for profile in &profiles.profile_entries {
-        send_ipc_cmd(app_state, &profile.id, IPC_CMD_UPDATE_PROFILE_LIST);
+        send_ipc_cmd(app_state, &profile.id, IPCCommand::UpdateProfileList);
     }
 }
 
-// Notify all other running instances to update their options list
+// Notify all other running instances to update their options
 pub fn notify_options_changed(app_state: &AppState, profiles: &ProfilesIniState) {
     for profile in &profiles.profile_entries {
-        send_ipc_cmd(app_state, &profile.id, IPC_CMD_UPDATE_OPTIONS);
+        send_ipc_cmd(app_state, &profile.id, IPCCommand::UpdateOptions);
+    }
+}
+
+// Notify all other running instances to close their managers
+pub fn notify_close_manager(app_state: &AppState, profiles: &ProfilesIniState) {
+    for profile in &profiles.profile_entries {
+        if Some(&profile.id) != app_state.cur_profile_id.as_ref() {
+            send_ipc_cmd(app_state, &profile.id, IPCCommand::CloseManager);
+        }
     }
 }
