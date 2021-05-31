@@ -55,11 +55,6 @@ pub fn process_cmd_launch_profile(app_state: &AppState,
         ), "Browser path: ".to_owned() + parent_proc.to_str().unwrap_or("UNKNOWN"))
     }
 
-    /*let launch_browser = || match spawn_browser_proc(parent_proc, &profile.name) {
-        Ok(_) => NativeResponse::success(NativeResponseData::ProfileLaunched),
-        Err(e) => NativeResponse::error_with_dbg_msg("Failed to launch browser with new profile!", e)
-    };*/
-
     log::trace!("Browser binary found: {:?}", parent_proc);
 
     cfg_if! {
