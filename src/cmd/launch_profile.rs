@@ -42,9 +42,12 @@ pub fn process_cmd_launch_profile(app_state: &AppState,
         Err(e) => { log::info!("Failed to focus current browser window, launching new window: {:?}", e); }
     }
 
-    let parent_proc = match get_parent_proc_path() {
-        Ok(v) => v,
-        Err(e) => return NativeResponse::error_with_dbg_msg("Unable to find browser binary!", e)
+    let parent_proc = match app_state.config.browser_binary() {
+        Some(v) => v.clone(),
+        None => match get_parent_proc_path() {
+            Ok(v) => v,
+            Err(e) => return NativeResponse::error_with_dbg_msg("Unable to find browser binary!", e)
+        }
     };
 
     if !parent_proc.exists() {

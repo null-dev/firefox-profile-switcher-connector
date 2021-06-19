@@ -7,17 +7,25 @@ use std::fs::OpenOptions;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
-    pub browser_profile_dir: PathBuf
+    browser_profile_dir: Option<PathBuf>,
+    browser_binary: Option<PathBuf>
 }
 
 impl Config {
+    pub fn browser_profile_dir(&self) -> PathBuf {
+        self.browser_profile_dir.clone().unwrap_or_else(get_default_browser_profile_folder)
+    }
+    pub fn browser_binary(&self) -> Option<&PathBuf> {
+        self.browser_binary.as_ref()
+    }
+
     pub fn profiles_ini_path(&self) -> PathBuf {
-        let mut profiles_ini = self.browser_profile_dir.clone();
+        let mut profiles_ini = self.browser_profile_dir().clone();
         profiles_ini.push("profiles.ini");
         return profiles_ini;
     }
     pub fn installs_ini_path(&self) -> PathBuf {
-        let mut installs_ini = self.browser_profile_dir.clone();
+        let mut installs_ini = self.browser_profile_dir().clone();
         installs_ini.push("installs.ini");
         return installs_ini;
     }
@@ -51,7 +59,8 @@ fn get_default_browser_profile_folder() -> PathBuf {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            browser_profile_dir: get_default_browser_profile_folder()
+            browser_profile_dir: None,
+            browser_binary: None
         }
     }
 }
