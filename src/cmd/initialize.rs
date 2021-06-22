@@ -11,7 +11,7 @@ pub fn process_cmd_initialize(app_state: &mut AppState,
                               msg: NativeMessageInitialize) -> NativeResponse {
     if let Some(profile_id) = &msg.profile_id {
         log::trace!("Profile ID was provided by extension: {}", profile_id);
-        finish_init(app_state, profiles, profile_id);
+        finish_init(app_state, profiles, profile_id, msg.extension_id);
         return NativeResponse::success(NativeResponseData::Initialized { cached: true })
     }
 
@@ -38,7 +38,7 @@ pub fn process_cmd_initialize(app_state: &mut AppState,
         if ext_installed {
             let profile_id = profile.id.clone();
             log::trace!("Profile ID determined: {}", profile_id);
-            finish_init(app_state, profiles, &profile_id);
+            finish_init(app_state, profiles, &profile_id, msg.extension_id);
             return NativeResponse::success(NativeResponseData::Initialized { cached: false })
         }
     }
@@ -46,8 +46,9 @@ pub fn process_cmd_initialize(app_state: &mut AppState,
     return NativeResponse::error("Unable to detect current profile.")
 }
 
-fn finish_init(app_state: &mut AppState, profiles: &mut ProfilesIniState, profile_id: &str) {
+fn finish_init(app_state: &mut AppState, profiles: &mut ProfilesIniState, profile_id: &str, internal_ext_id: String) {
     app_state.cur_profile_id = Some(profile_id.to_owned());
+    app_state.internal_extension_id = Some(internal_ext_id);
 
     if app_state.first_run {
         app_state.first_run = false;

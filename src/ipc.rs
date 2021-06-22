@@ -7,10 +7,11 @@ use std::path::PathBuf;
 use crate::native_resp::{write_native_response, NativeResponseWrapper, NATIVE_RESP_ID_EVENT, NativeResponse, NativeResponseEvent, NativeResponseProfileListProfileEntry, write_native_event};
 use crate::profiles::{read_profiles, ProfilesIniState};
 use crate::options::{read_global_options, native_notify_updated_options};
-use crate::storage::options_data_path;
+use crate::storage::{options_data_path, global_options_data_path};
 use cfg_if::cfg_if;
 use serde::{Serialize, Deserialize};
 use serde_json::value::Serializer;
+use crate::process::fork_browser_proc;
 
 // === IPC ===
 #[derive(Serialize, Deserialize, Debug)]
@@ -106,12 +107,7 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: IPCCommand) {
     log::trace!("Executing IPC command: {:?}", cmd);
 
     match cmd {
-        IPCCommand::FocusWindow(options) => {
-            // Focus window
-            write_native_event(NativeResponseEvent::FocusWindow {
-                url: options.url
-            });
-        }
+        IPCCommand::FocusWindow(options) => handle_ipc_cmd_focus_window(app_state, options),
         IPCCommand::UpdateProfileList => {
             match read_profiles(&app_state.config, &app_state.config_dir) {
                 Ok(profiles) => {
@@ -137,6 +133,32 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: IPCCommand) {
             native_notify_updated_options(app_state);
         }
     }
+}
+
+fn handle_ipc_cmd_focus_window(app_state: &AppState, cmd: FocusWindowCommand) {
+    if let Some(extension_id) = app_state.internal_extension_id.as_ref() {
+        if let Some(cur_profile_id) = app_state.cur_profile_id.as_ref() {
+            let global_options = read_global_options(&global_options_data_path(&app_state.config_dir));
+            if global_options["windowFocusWorkaround"] == serde_json::Value::Bool(true) {
+                if let Ok(profiles) = read_profiles(&app_state.config, &app_state.config_dir) {
+                    if let Some(cur_profile) = profiles.profile_entries
+                        .iter()
+                        .find(|e| &e.id == cur_profile_id) {
+                        let url = match cmd.url {
+                            Some(url) => url,
+                            None => format!("moz-extension://{}/js/winfocus/winfocus.html", extension_id)
+                        };
+                        fork_browser_proc(app_state, cur_profile, Some(url));
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    // Focus window
+    write_native_event(NativeResponseEvent::FocusWindow {
+        url: cmd.url
+    });
 }
 
 #[derive(Debug)]

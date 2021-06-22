@@ -6,6 +6,7 @@ mod native_req;
 mod native_resp;
 mod ipc;
 mod cmd;
+mod process;
 
 extern crate ini;
 extern crate serde;
@@ -49,6 +50,7 @@ mod state {
         pub first_run: bool,
         pub cur_profile_id: Option<String>,
         pub extension_id: Option<String>,
+        pub internal_extension_id: Option<String>,
         pub config_dir: PathBuf,
         pub data_dir: PathBuf
     }
@@ -130,6 +132,7 @@ fn main() {
         first_run,
         cur_profile_id: None,
         extension_id: extension_id.cloned(),
+        internal_extension_id: None,
         config_dir: pref_dir.to_path_buf(),
         data_dir: data_dir.to_path_buf()
     };
