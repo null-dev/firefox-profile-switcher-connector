@@ -126,7 +126,7 @@ jobs:
             target/release/mac-${{ matrix.target }}
             manifest/manifest-mac.json
   release:
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows, build-mac]
     runs-on: ubuntu-latest
     steps:
       - name: Install utils
