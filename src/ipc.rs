@@ -57,7 +57,13 @@ fn handle_conn(app_state: &AppState, mut conn: LocalSocketStream) {
     // Read command
     let mut deserializer = serde_cbor::Deserializer::from_reader(&mut conn);
     match IPCCommand::deserialize(&mut deserializer) {
-        Ok(command) => handle_ipc_cmd(app_state, command),
+        Ok(command) => {
+            let app_state_clone = app_state.clone();
+            // Windows doesn't seem to like it if we block when reading from a named pipe
+            //   So instead handle the command in a new thread to avoid doing expensive stuff
+            //   in the IPC thread.
+            thread::spawn(move || handle_ipc_cmd(&app_state_clone, command));
+        }
         Err(e) => {
             log::error!("Failed to read command from IPC: {:?}", e);
             return
