@@ -100,6 +100,7 @@ fn spawn_browser_proc(bin_path: &PathBuf, profile_name: &str, url: Option<String
             .arg("--new-tab")
             .arg(url);
     }
+    log::trace!("Executing command: {:?}", command);
     return command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
