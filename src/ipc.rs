@@ -31,12 +31,15 @@ fn get_ipc_socket_name(profile_id: &str, reset: bool) -> io::Result<impl ToLocal
         if #[cfg(target_family = "unix")] {
             // TODO Somehow delete unix socket afterwards? IDK, could break everything if new instance starts before we delete socket
             let path: PathBuf = ["/tmp", ("fps-profile_".to_owned() + profile_id).as_str()].iter().collect();
+            log::trace!("IPC socket for profile {:?} resolved to: {:?}", profile_id, path);
             if reset {
                 fs::remove_file(&path); // Delete old socket
             }
             return Ok(path);
         } else if #[cfg(target_family = "windows")] {
-            return Ok("@fps-profile_".to_owned() + profile_id);
+            let name = "@fps-profile_".to_owned() + profile_id;
+            log::trace!("IPC pipe for profile {:?} resolved to: {:?}", profile_id, name);
+            return Ok(name);
         } else {
             compile_error!("Unknown OS!");
         }
@@ -139,6 +142,8 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: IPCCommand) {
             native_notify_updated_options(app_state);
         }
     }
+
+    log::trace!("Execution complete!");
 }
 
 fn handle_ipc_cmd_focus_window(app_state: &AppState, cmd: FocusWindowCommand) {

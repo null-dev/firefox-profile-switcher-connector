@@ -53,6 +53,7 @@ fn get_default_browser_profile_folder() -> PathBuf {
             compile_error!("Unknown OS!");
         }
     }
+    log::trace!("Found default browser profile dir: {:?}", result);
     return result;
 }
 
