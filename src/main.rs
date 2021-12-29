@@ -18,7 +18,6 @@ extern crate cfg_if;
 extern crate ring;
 extern crate data_encoding;
 extern crate ulid;
-extern crate interprocess;
 extern crate fern;
 extern crate log;
 extern crate url;

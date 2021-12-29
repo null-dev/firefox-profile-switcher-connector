@@ -1,14 +1,16 @@
-use interprocess::local_socket::{ToLocalSocketName, LocalSocketStream, LocalSocketListener};
 use std::{io, fs, thread};
 use crate::state::AppState;
 use byteorder::{WriteBytesExt, NetworkEndian, ReadBytesExt};
 use std::io::{Write, Read, BufReader, BufWriter};
 use std::path::PathBuf;
+use std::time::Duration;
 use crate::native_resp::{write_native_response, NativeResponseWrapper, NATIVE_RESP_ID_EVENT, NativeResponse, NativeResponseEvent, NativeResponseProfileListProfileEntry, write_native_event};
 use crate::profiles::{read_profiles, ProfilesIniState};
 use crate::options::{read_global_options, native_notify_updated_options};
 use crate::storage::{options_data_path, global_options_data_path};
 use cfg_if::cfg_if;
+use nng::{Message, Protocol, Socket};
+use nng::options::{Options, RecvTimeout, SendTimeout};
 use serde::{Serialize, Deserialize};
 use serde_json::value::Serializer;
 use crate::process::fork_browser_proc;
@@ -26,18 +28,15 @@ enum IPCCommand {
 struct FocusWindowCommand {
     url: Option<String>
 }
-fn get_ipc_socket_name(profile_id: &str, reset: bool) -> io::Result<impl ToLocalSocketName<'static>> {
+fn get_ipc_socket_name(profile_id: &str, reset: bool) -> io::Result<String> {
     cfg_if! {
         if #[cfg(target_family = "unix")] {
             // TODO Somehow delete unix socket afterwards? IDK, could break everything if new instance starts before we delete socket
-            let path: PathBuf = ["/tmp", ("fps-profile_".to_owned() + profile_id).as_str()].iter().collect();
-            log::trace!("IPC socket for profile {:?} resolved to: {:?}", profile_id, path);
-            if reset {
-                fs::remove_file(&path); // Delete old socket
-            }
-            return Ok(path);
+            let url = format!("ipc:///tmp/fps-profile_{}", profile_id);
+            log::trace!("IPC socket for profile {:?} resolved to: {:?}", profile_id, url);
+            return Ok(url);
         } else if #[cfg(target_family = "windows")] {
-            let name = "@fps-profile_".to_owned() + profile_id;
+            let name = format!("ipc://fps-profile_{}", profile_id);
             log::trace!("IPC pipe for profile {:?} resolved to: {:?}", profile_id, name);
             return Ok(name);
         } else {
@@ -46,19 +45,9 @@ fn get_ipc_socket_name(profile_id: &str, reset: bool) -> io::Result<impl ToLocal
     }
 }
 
-fn handle_conn(app_state: &AppState, mut conn: LocalSocketStream) {
-    // Write version
-    if let Err(e) = conn.write_u8(0).and_then(|_| conn.flush()) {
-        match e.kind() {
-            _ => log::error!("IPC error while writing version: {:?}", e)
-        }
-        return
-    }
-
-    // We no longer attempt to read multiple messages on a connection, blame Windows...
-
+fn handle_conn(app_state: &AppState, server: &Socket, msg: Message) {
     // Read command
-    let mut deserializer = serde_cbor::Deserializer::from_reader(&mut conn);
+    let mut deserializer = serde_cbor::Deserializer::from_slice(msg.as_slice());
     match IPCCommand::deserialize(&mut deserializer) {
         Ok(command) => {
             let app_state_clone = app_state.clone();
@@ -75,10 +64,8 @@ fn handle_conn(app_state: &AppState, mut conn: LocalSocketStream) {
 
     // TODO Write different status if command failed
     // Write command status
-    if let Err(e) = conn.write_i32::<NetworkEndian>(0).and_then(|_| conn.flush()) {
-        match e.kind() {
-            _ => log::error!("IPC error while writing command status: {:?}", e)
-        }
+    if let Err(e) = server.send(Message::from([0])) {
+        log::error!("IPC error while writing command status: {:?}", e);
         return
     }
 }
@@ -87,29 +74,14 @@ pub fn setup_ipc(cur_profile_id: &str, app_state: &AppState) -> std::result::Res
     log::trace!("Starting IPC server...");
     let socket_name = get_ipc_socket_name(cur_profile_id, true)?;
 
-    let listener = LocalSocketListener::bind(socket_name)?;
-    for mut conn in listener.incoming() {
-        match conn {
-            Ok(stream) => {
-                log::trace!("Incoming IPC connection.");
-                let app_state = app_state.clone();
+    let server = Socket::new(Protocol::Rep0)?;
+    server.listen(&socket_name)?;
+    loop {
+        let msg = server.recv()?;
+        let app_state = app_state.clone();
 
-                // Windows seems to have trouble with multiple threads and named pipes :(
-                cfg_if! {
-                    if #[cfg(target_family = "windows")] {
-                        handle_conn(&app_state, stream);
-                    } else {
-                        thread::spawn(move || handle_conn(&app_state, stream));
-                    }
-                }
-            }
-            Err(e) => {
-                log::error!("Incoming IPC connection failure: {:?}", e);
-            }
-        }
+        handle_conn(&app_state, &server, msg);
     }
-
-    return Ok(());
 }
 
 fn handle_ipc_cmd(app_state: &AppState, cmd: IPCCommand) {
@@ -177,7 +149,8 @@ pub enum IpcError {
     NotRunning,
     BadStatus,
     SerializationError(serde_cbor::Error),
-    IoError(io::Error)
+    IoError(io::Error),
+    NetworkError(nng::Error)
 }
 
 fn send_ipc_cmd(app_state: &AppState, target_profile_id: &str, cmd: IPCCommand) -> std::result::Result<(), IpcError> {
@@ -189,20 +162,22 @@ fn send_ipc_cmd(app_state: &AppState, target_profile_id: &str, cmd: IPCCommand) 
         Ok(())
     } else {
         let socket_name = get_ipc_socket_name(target_profile_id, false)
-            .map_err(|e| {IpcError::IoError(e)})?;
+            .map_err(IpcError::IoError)?;
 
-        let mut conn = LocalSocketStream::connect(socket_name).map_err(|e| {IpcError::IoError(e)})?;
-        log::trace!("Connected to IPC target, reading remote version...");
-        let remote_version = conn.read_u8().map_err(|e| {IpcError::IoError(e)})?;
-        log::trace!("Remote version is: {}, Writing IPC command...", remote_version);
-        serde_cbor::to_writer(&mut conn, &cmd)
-            .map_err(IpcError::SerializationError)
-            .and_then(|_| conn.flush()
-                .map_err(IpcError::IoError))?;
+        let mut conn = Socket::new(Protocol::Req0).map_err(IpcError::NetworkError)?;
+        conn.set_opt::<SendTimeout>(Some(Duration::from_millis(500)));
+        conn.set_opt::<RecvTimeout>(Some(Duration::from_millis(3000)));
+        conn.dial(&socket_name).map_err(IpcError::NetworkError)?;
+        log::trace!("Writing IPC command...");
+        let serialized = serde_cbor::to_vec(&cmd)
+            .map_err(IpcError::SerializationError)?;
+        conn.send(Message::from(&serialized));
         log::trace!("IPC command written, reading status...");
-        let status = conn.read_i32::<NetworkEndian>().map_err(|e| {IpcError::IoError(e)})?;
+        let resp = conn.recv()
+            .map_err(IpcError::NetworkError)?;
+        let status = resp.first().unwrap_or(&1);
         log::trace!("IPC command status is: {}", status);
-        if status == 0 {
+        if *status == 0 {
             Ok(())
         } else {
             Err(IpcError::BadStatus)

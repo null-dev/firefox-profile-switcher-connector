@@ -23,12 +23,12 @@ cfg-if = "0.1"
 ring = "0.16.15"
 data-encoding = "2.3"
 ulid = "0.4"
-interprocess = "1.0"
 log = "0.4"
 fern = "0.6.0"
 url = "2.2.0"
 chrono = "0.4"
 rand = "0.8"
+nng = "1.0.1"
 
 [target.'cfg(target_family = "unix")'.dependencies]
 nix = "0.19"
