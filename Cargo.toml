@@ -1,6 +1,6 @@
 [package]
 name = "firefox_profile_switcher_connector"
-version = "0.0.8"
+version = "0.0.9"
 authors = ["nulldev <contact@andybao.me>"]
 edition = "2018"
 license = "GPL-3.0-only"
