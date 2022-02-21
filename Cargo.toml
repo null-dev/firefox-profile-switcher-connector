@@ -29,7 +29,6 @@ url = "2.2.0"
 chrono = "0.4"
 rand = "0.8"
 nng = "1.0.1"
-static_vcruntime = "1.5"
 
 [target.'cfg(target_family = "unix")'.dependencies]
 nix = "0.19"
@@ -59,5 +58,12 @@ firefox_profile_switcher_connector = { path = "/usr/bin/ff-pswitch-connector" }
 
 [package.metadata.rpm.files]
 "../manifest/manifest-linux.json" = { path = "/usr/lib/mozilla/native-messaging-hosts/ax.nd.profile_switcher_ff.json" }
+
+# Statically link C runtime, see: https://volks73.github.io/cargo-wix/cargo_wix/index.html#c-runtime
+# We tried using https://github.com/ChrisDenton/static_vcruntime but it doesn't build
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+[target.i686-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
 
 # TODO Strip once https://github.com/rust-lang/rust/issues/72110 is on stable
