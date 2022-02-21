@@ -29,6 +29,7 @@ url = "2.2.0"
 chrono = "0.4"
 rand = "0.8"
 nng = "1.0.1"
+static_vcruntime = "1.5"
 
 [target.'cfg(target_family = "unix")'.dependencies]
 nix = "0.19"

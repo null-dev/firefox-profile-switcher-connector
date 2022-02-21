@@ -25,6 +25,10 @@ extern crate chrono;
 extern crate rand;
 extern crate serde_cbor;
 
+// By default, Rust requires programs to deploy vcruntime140.dll when redistributing binaries on Windows.
+// The static_vcruntime crate statically links the library instead.
+extern crate static_vcruntime; // Required for static_vcruntime to work
+
 use std::{io, env};
 use std::fs;
 use directories::ProjectDirs;
