@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::fs::OpenOptions;
 use std::io;
 use crate::storage::global_options_data_path;
-use crate::native_resp::{write_native_response, NativeResponseWrapper, write_native_event, NativeResponseEvent};
+use crate::native_resp::{write_native_event, NativeResponseEvent};
 use crate::state::AppState;
 
 // === GLOBAL OPTIONS ===

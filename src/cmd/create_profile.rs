@@ -4,7 +4,6 @@ use crate::profiles::{ProfilesIniState, ProfileEntry, calc_profile_id, write_pro
 use crate::native_req::NativeMessageCreateProfile;
 use crate::native_resp::{NativeResponse, NativeResponseProfileListProfileEntry, NativeResponseData};
 use ulid::Ulid;
-use std::collections::HashMap;
 use std::fs;
 use std::fs::OpenOptions;
 use std::path::PathBuf;

@@ -32,7 +32,9 @@ pub fn process_cmd_launch_profile(app_state: &AppState,
             "The version of your browser that is currently running can no longer be found. ",
             "This is usually because your browser has updated but you haven't restarted your browser recently to apply the update. ",
             "Please restart your browser to resolve this issue."
-            ))
+            )),
+            ForkBrowserProcError::COMError { .. } => NativeResponse::error_with_dbg_msg("Failed to launch browser with new profile (Windows COM error)!", e),
+            ForkBrowserProcError::MSIXProcessLaunchError { .. } => NativeResponse::error_with_dbg_msg("Failed to launch browser with new profile (Windows AAM error)!", e),
         }
     }
 }

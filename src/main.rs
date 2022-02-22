@@ -11,7 +11,6 @@ mod process;
 extern crate ini;
 extern crate serde;
 extern crate serde_json;
-extern crate byteorder;
 extern crate directories;
 extern crate fs2;
 extern crate cfg_if;
@@ -25,14 +24,25 @@ extern crate chrono;
 extern crate rand;
 extern crate serde_cbor;
 
+cfg_if! {
+    if #[cfg(target_family = "unix")] {
+        extern crate nix;
+        extern crate libc;
+    } else if #[cfg(target_family = "windows")] {
+        extern crate windows;
+        use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+    }
+}
+
 use std::{io, env};
 use std::fs;
+use cfg_if::cfg_if;
 use directories::ProjectDirs;
 use rand::Rng;
 use crate::config::{read_configuration};
 use crate::profiles::read_profiles;
 use crate::state::AppState;
-use crate::native_resp::{NativeResponseEvent, write_native_response, NativeResponseWrapper, NATIVE_RESP_ID_EVENT, NativeResponse, write_native_event};
+use crate::native_resp::{NativeResponseEvent, write_native_response, NativeResponseWrapper, NativeResponse, write_native_event};
 use crate::cmd::execute_cmd_for_message;
 use crate::native_req::{read_incoming_message, NativeMessage};
 
@@ -110,6 +120,17 @@ fn main() {
         .expect("Failed to setup logging!");
 
     log::trace!("Finished setup logging (app version: {}).", APP_VERSION);
+
+    // Initialize Windows COM library
+    cfg_if! {
+        if #[cfg(target_family = "windows")] {
+            if let Err(e) = unsafe { CoInitializeEx(std::ptr::null(), COINIT_MULTITHREADED) } {
+                log::trace!("Windows COM library initialization failure, continuing anyway: {:?}", e);
+            } else {
+                log::trace!("Windows COM library initialized.");
+            }
+        }
+    }
 
     // Find extension ID
     let args: Vec<String> = env::args().collect();

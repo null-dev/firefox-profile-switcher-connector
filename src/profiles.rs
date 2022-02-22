@@ -23,8 +23,8 @@ pub struct ProfileEntry {
 
 impl ProfileEntry {
     pub fn full_path(&self, config: &Config) -> PathBuf {
-        return if self.is_relative {
-            let mut result = config.browser_profile_dir().clone();
+        if self.is_relative {
+            let mut result = config.browser_profile_dir();
             result.push(&self.path);
             result
         } else {

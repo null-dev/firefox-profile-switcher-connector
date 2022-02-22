@@ -1,18 +1,14 @@
-use std::{io, fs, thread};
+use std::{io, thread};
 use crate::state::AppState;
-use byteorder::{WriteBytesExt, NetworkEndian, ReadBytesExt};
-use std::io::{Write, Read, BufReader, BufWriter};
-use std::path::PathBuf;
 use std::time::Duration;
-use crate::native_resp::{write_native_response, NativeResponseWrapper, NATIVE_RESP_ID_EVENT, NativeResponse, NativeResponseEvent, NativeResponseProfileListProfileEntry, write_native_event};
+use crate::native_resp::{NATIVE_RESP_ID_EVENT, NativeResponse, NativeResponseEvent, NativeResponseProfileListProfileEntry, write_native_event};
 use crate::profiles::{read_profiles, ProfilesIniState};
 use crate::options::{read_global_options, native_notify_updated_options};
-use crate::storage::{options_data_path, global_options_data_path};
+use crate::storage::{global_options_data_path};
 use cfg_if::cfg_if;
 use nng::{Message, Protocol, Socket};
 use nng::options::{Options, RecvTimeout, SendTimeout};
 use serde::{Serialize, Deserialize};
-use serde_json::value::Serializer;
 use crate::process::fork_browser_proc;
 
 // === IPC ===
@@ -146,7 +142,6 @@ fn handle_ipc_cmd_focus_window(app_state: &AppState, cmd: FocusWindowCommand) {
 
 #[derive(Debug)]
 pub enum IpcError {
-    NotRunning,
     BadStatus,
     SerializationError(serde_cbor::Error),
     IoError(io::Error),
@@ -164,7 +159,7 @@ fn send_ipc_cmd(app_state: &AppState, target_profile_id: &str, cmd: IPCCommand) 
         let socket_name = get_ipc_socket_name(target_profile_id, false)
             .map_err(IpcError::IoError)?;
 
-        let mut conn = Socket::new(Protocol::Req0).map_err(IpcError::NetworkError)?;
+        let conn = Socket::new(Protocol::Req0).map_err(IpcError::NetworkError)?;
         conn.set_opt::<SendTimeout>(Some(Duration::from_millis(500)));
         conn.set_opt::<RecvTimeout>(Some(Duration::from_millis(3000)));
         conn.dial(&socket_name).map_err(IpcError::NetworkError)?;
