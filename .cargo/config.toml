@@ -1,0 +1,6 @@
+# Statically link C runtime, see: https://volks73.github.io/cargo-wix/cargo_wix/index.html#c-runtime
+# We tried using https://github.com/ChrisDenton/static_vcruntime but it doesn't build
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+[target.i686-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
