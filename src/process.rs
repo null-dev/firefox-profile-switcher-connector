@@ -14,8 +14,9 @@ cfg_if! {
         use nix::unistd::ForkResult;
         use nix::sys::wait::waitpid;
     } else if #[cfg(target_family = "windows")] {
-        extern crate winapi;
+        extern crate windows;
 
+        use windows::Win32::System::Threading as win_threading;
         use std::os::windows::process::CommandExt;
     } else {
         compile_error!("Unknown OS!");
@@ -89,7 +90,7 @@ fn spawn_browser_proc(bin_path: &PathBuf, profile_name: &str, url: Option<String
     let mut command = Command::new(bin_path);
     cfg_if! {
         if #[cfg(target_family = "windows")] {
-            command.creation_flags((winapi::um::winbase::DETACHED_PROCESS | winapi::um::winbase::CREATE_BREAKAWAY_FROM_JOB) as u32);
+            command.creation_flags((win_threading::DETACHED_PROCESS | win_threading::CREATE_BREAKAWAY_FROM_JOB).0);
         }
     }
     command
