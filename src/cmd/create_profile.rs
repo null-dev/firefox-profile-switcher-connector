@@ -51,8 +51,6 @@ impl ExtensionsJson {
 }
 
 pub fn process_cmd_create_profile(app_state: &AppState, profiles: &mut ProfilesIniState, msg: NativeMessageCreateProfile) -> NativeResponse {
-    // TODO Inject extension into new profiles
-
     let new_trimmed_name = msg.name.trim();
     let name_conflict = profiles.profile_entries.iter().any(|p| p.name.trim().eq_ignore_ascii_case(new_trimmed_name));
 
@@ -78,10 +76,11 @@ pub fn process_cmd_create_profile(app_state: &AppState, profiles: &mut ProfilesI
         return NativeResponse::error_with_dbg_msg("Failed to folder for new profile!", e);
     }
 
-    // Read current extensions JSON
+    // Inject extension into new profiles
     // TODO Extract this into function to fix this huge if-let chain
     {
         if let Some(our_profile) = profiles.profile_entries.iter().find(|p| Some(&p.id) == app_state.cur_profile_id.as_ref()) {
+            // Read current extensions JSON
             let mut extensions_path = our_profile.full_path(&app_state.config);
             extensions_path.push("extensions.json");
             if let Ok(extensions_file) = OpenOptions::new()
