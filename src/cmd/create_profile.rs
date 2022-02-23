@@ -37,14 +37,15 @@ fn find_extension_chunk<'a>(app_state: &AppState, json: &'a Value) -> Option<&'a
 #[derive(Serialize)]
 struct ExtensionsJson {
     #[serde(rename = "schemaVersion")]
-    schema_version: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    schema_version: Option<Value>,
     addons: Vec<Value>
 }
 
 impl ExtensionsJson {
-    fn from_extension_chunk(chunk: serde_json::Map<String, Value>) -> Self {
+    fn from_extension_chunk(schema_version: Option<Value>, chunk: serde_json::Map<String, Value>) -> Self {
         ExtensionsJson {
-            schema_version: 33,
+            schema_version,
             addons: [Value::Object(chunk)].to_vec()
         }
     }
@@ -121,7 +122,10 @@ pub fn process_cmd_create_profile(app_state: &AppState, profiles: &mut ProfilesI
 
 
                             // Now we have a valid extension chunk, let's create a new extensions.json with it
-                            let extensions_json_content = ExtensionsJson::from_extension_chunk(extension_chunk);
+                            let extensions_json_content = ExtensionsJson::from_extension_chunk(
+                                extensions_json.get("schemaVersion").cloned(),
+                                extension_chunk
+                            );
 
                             // Write extension chunk
                             let mut extensions_json_path = new_profile_full_path.clone();
@@ -148,6 +152,8 @@ pub fn process_cmd_create_profile(app_state: &AppState, profiles: &mut ProfilesI
                                 }
                             }
                         }
+                    } else {
+                        log::error!("Failed to find extension chunk!");
                     }
                 }
             }
