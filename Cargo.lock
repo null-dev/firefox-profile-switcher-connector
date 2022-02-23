@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "firefox_profile_switcher_connector"
-version = "0.0.9"
+version = "0.1.0"
 dependencies = [
  "byteorder",
  "cfg-if 0.1.10",
