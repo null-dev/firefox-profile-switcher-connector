@@ -3,7 +3,7 @@ use serde_json::Value;
 use serde::{Deserialize, Serialize};
 use crate::config::Config;
 use std::path::{PathBuf, Path};
-use ini::Ini;
+use ini::{EscapePolicy, Ini, ParseOption};
 use std::io;
 use std::fs::OpenOptions;
 use crate::storage::{avatar_data_path, options_data_path};
@@ -58,8 +58,18 @@ pub enum ReadProfilesError {
     BadOptionsStoreFormat(serde_json::Error)
 }
 
+const MOZ_INI_PARSE_OPTION: ParseOption = ParseOption {
+    enabled_quote: false,
+    enabled_escape: false
+};
+// Firefox doesn't escape backslashes, emojis, equal signs, and even quotation marks...
+// Does it even escape anything at all?
+// Note that this will cause problems if users put newlines or null bytes in their string
+// But we can't really do anything about this...
+const MOZ_INI_ESCAPE_POLICY: EscapePolicy = EscapePolicy::Nothing;
+
 pub fn read_profiles(config: &Config, config_dir: &Path) -> Result<ProfilesIniState, ReadProfilesError> {
-    let profiles_conf = Ini::load_from_file(config.profiles_ini_path())
+    let profiles_conf = Ini::load_from_file_opt(config.profiles_ini_path(), MOZ_INI_PARSE_OPTION)
         .map_err(ReadProfilesError::IniError)?;
 
     let avatar_data: AvatarData = OpenOptions::new()
@@ -212,13 +222,13 @@ pub fn write_profiles(config: &Config, config_dir: &Path, state: &ProfilesIniSta
         }
     }
 
-    if let Err(e) = new_ini.write_to_file(config.profiles_ini_path()) {
+    if let Err(e) = new_ini.write_to_file_policy(config.profiles_ini_path(), MOZ_INI_ESCAPE_POLICY) {
         return Err(WriteProfilesError::WriteIniError(e))
     }
 
     // Write install INI
     if let Some(default_profile_path) = default_profile_path {
-        let installs_conf = Ini::load_from_file(config.installs_ini_path());
+        let installs_conf = Ini::load_from_file_opt(config.installs_ini_path(), MOZ_INI_PARSE_OPTION);
         if let Ok(mut installs_conf) = installs_conf {
             for (sec, prop) in &mut installs_conf {
                 if let Some(sec) = sec {
@@ -228,7 +238,7 @@ pub fn write_profiles(config: &Config, config_dir: &Path, state: &ProfilesIniSta
                     }
                 }
             }
-            if let Err(e) = installs_conf.write_to_file(config.installs_ini_path()) {
+            if let Err(e) = installs_conf.write_to_file_policy(config.installs_ini_path(), MOZ_INI_ESCAPE_POLICY) {
                 log::warn!("Failed to write installs.ini: {:?}", e);
             }
         }
