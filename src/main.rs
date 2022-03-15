@@ -37,7 +37,7 @@ cfg_if! {
 use std::{io, env};
 use std::fs;
 use cfg_if::cfg_if;
-use directories::ProjectDirs;
+use directories::{ProjectDirs, UserDirs};
 use rand::Rng;
 use crate::config::{read_configuration};
 use crate::profiles::read_profiles;
@@ -83,16 +83,17 @@ fn main() {
 
     let first_run = !data_dir.exists();
 
+    let desktop = UserDirs::new()
+        .expect("Unable to find user dirs!")
+        .desktop_dir()
+        .expect("Unable to find desktop dir!");
+
     // mkdirs
     fs::create_dir_all(pref_dir);
     fs::create_dir_all(data_dir);
 
     // Enable full logging when debugging is enabled
-    let log_level = if data_dir.join("DEBUG").exists() {
-        log::LevelFilter::Trace
-    } else {
-        log::LevelFilter::Warn
-    };
+    let log_level = log::LevelFilter::Trace;
 
     // Use to keep track of instances through a log session
     let instance_key: String = rand::thread_rng()
@@ -104,7 +105,7 @@ fn main() {
     // Setup logging
     fern::Dispatch::new()
         .level(log_level)
-        .chain(fern::log_file(data_dir.join("log.txt"))
+        .chain(fern::log_file(desktop.join("firefox-profile-switcher-log.txt"))
             .expect("Unable to open logfile!"))
         .format(move |out, message, record| {
             out.finish(format_args!(
