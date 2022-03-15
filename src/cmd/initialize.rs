@@ -3,7 +3,6 @@ use crate::profiles::{ProfilesIniState, write_profiles};
 use crate::native_req::NativeMessageInitialize;
 use crate::native_resp::{NativeResponse, NativeResponseData, NativeResponseEvent, NativeResponseProfileListProfileEntry, write_native_event};
 use std::{thread, fs};
-use libc::abort;
 use crate::ipc::setup_ipc;
 use crate::options::native_notify_updated_options;
 
