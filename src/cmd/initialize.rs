@@ -38,11 +38,12 @@ pub fn process_cmd_initialize(app_state: &mut AppState,
         for profile in profile_dir {
             match profile {
                 Ok(dir) => {
-                    let folder_name = dir.file_name().to_string_lossy();
+                    let folder_name_os = dir.file_name();
+                    let folder_name = folder_name_os.to_string_lossy();
                     if folder_name.starts_with("moz") {
                         log::trace!("\t\t{}", folder_name);
                     }
-                    if folder_name.starts_with("moz-extension+++".to_owned() + &msg.extension_id) {
+                    if folder_name.starts_with(&("moz-extension+++".to_owned() + &msg.extension_id)) {
                         log::trace!("\t\t\t^This extension matches our extension ID!");
                         ext_installed = true;
                     }

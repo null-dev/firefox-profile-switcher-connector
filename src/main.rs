@@ -83,8 +83,9 @@ fn main() {
 
     let first_run = !data_dir.exists();
 
-    let desktop = UserDirs::new()
-        .expect("Unable to find user dirs!")
+    let user_dirs = UserDirs::new()
+        .expect("Unable to find user dirs!");
+    let desktop = user_dirs
         .desktop_dir()
         .expect("Unable to find desktop dir!");
 
