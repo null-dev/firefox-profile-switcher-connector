@@ -103,10 +103,16 @@ fn main() {
         .map(char::from)
         .collect();
 
+    let log_file = desktop.join("firefox-profile-switcher-log.txt");
+
+    if log_file.exists() {
+        panic!("Log file exists already, exiting!");
+    }
+
     // Setup logging
     fern::Dispatch::new()
         .level(log_level)
-        .chain(fern::log_file(desktop.join("firefox-profile-switcher-log.txt"))
+        .chain(fern::log_file(log_file)
             .expect("Unable to open logfile!"))
         .format(move |out, message, record| {
             out.finish(format_args!(

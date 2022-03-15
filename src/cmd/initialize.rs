@@ -58,12 +58,14 @@ pub fn process_cmd_initialize(app_state: &mut AppState,
             log::trace!("Profile ID determined: {}", profile_id);
             finish_init(app_state, profiles, &profile_id, msg.extension_id);
             log::trace!("Aborting as this is a debug build not meant for actual use!");
+            log::trace!("======================= END DEBUG LOG =======================");
             panic!("Aborting as this is a debug build!");
             return NativeResponse::success(NativeResponseData::Initialized { cached: false })
         }
     }
 
     log::trace!("Aborting as this is a debug build not meant for actual use!");
+    log::trace!("======================= END DEBUG LOG =======================");
     panic!("Aborting as this is a debug build!");
     return NativeResponse::error("Unable to detect current profile.")
 }
