@@ -80,7 +80,7 @@ pub fn fork_browser_proc(app_state: &AppState, profile: &ProfileEntry, url: Opti
         Some(v) => v,
         None => match get_parent_proc_path() {
             Ok(v) => v,
-            Err(e) => return Err(ForkBrowserProcError::BinaryNotFound)
+            Err(_) => return Err(ForkBrowserProcError::BinaryNotFound)
         }
     };
 
@@ -99,8 +99,8 @@ pub fn fork_browser_proc(app_state: &AppState, profile: &ProfileEntry, url: Opti
             match unsafe { nix::unistd::fork() } {
                 Ok(ForkResult::Parent {child}) => {
                     match waitpid(child, None) {
-                        Ok(nix::sys::wait::WaitStatus::Exited(child, 0)) => Ok(()),
-                        e => Err(ForkBrowserProcError::BadExitCode)
+                        Ok(nix::sys::wait::WaitStatus::Exited(_, 0)) => Ok(()),
+                        _ => Err(ForkBrowserProcError::BadExitCode)
                     }
                 },
                 Ok(ForkResult::Child) => exit(match nix::unistd::setsid() {
@@ -113,7 +113,7 @@ pub fn fork_browser_proc(app_state: &AppState, profile: &ProfileEntry, url: Opti
                         }*/
                         match spawn_browser_proc(&parent_proc, browser_args) {
                             Ok(_) => 0,
-                            Err(e) => 1
+                            Err(_) => 1
                         }
                     },
                     Err(_) => 2

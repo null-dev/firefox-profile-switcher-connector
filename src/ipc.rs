@@ -1,7 +1,8 @@
 use std::{io, thread};
 use crate::state::AppState;
 use std::time::Duration;
-use crate::native_resp::{NATIVE_RESP_ID_EVENT, NativeResponse, NativeResponseEvent, NativeResponseProfileListProfileEntry, write_native_event};
+use anyhow::Context;
+use crate::native_resp::{NativeResponseEvent, NativeResponseProfileListProfileEntry, write_native_event};
 use crate::profiles::{read_profiles, ProfilesIniState};
 use crate::options::{read_global_options, native_notify_updated_options};
 use crate::storage::{global_options_data_path};
@@ -9,6 +10,8 @@ use cfg_if::cfg_if;
 use nng::{Message, Protocol, Socket};
 use nng::options::{Options, RecvTimeout, SendTimeout};
 use serde::{Serialize, Deserialize};
+use crate::AppContext;
+use crate::avatars::{update_and_native_notify_avatars};
 use crate::process::fork_browser_proc;
 
 // === IPC ===
@@ -18,7 +21,8 @@ enum IPCCommand {
     FocusWindow(FocusWindowCommand),
     UpdateProfileList,
     CloseManager,
-    UpdateOptions
+    UpdateOptions,
+    UpdateAvatars,
 }
 #[derive(Serialize, Deserialize, Debug)]
 struct FocusWindowCommand {
@@ -41,16 +45,16 @@ fn get_ipc_socket_name(profile_id: &str, reset: bool) -> io::Result<String> {
     }
 }
 
-fn handle_conn(app_state: &AppState, server: &Socket, msg: Message) {
+fn handle_conn(context: &AppContext, server: &Socket, msg: Message) {
     // Read command
     let mut deserializer = serde_cbor::Deserializer::from_slice(msg.as_slice());
     match IPCCommand::deserialize(&mut deserializer) {
         Ok(command) => {
-            let app_state_clone = app_state.clone();
+            let context_clone = context.clone();
             // Windows doesn't seem to like it if we block when reading from a named pipe
             //   So instead handle the command in a new thread to avoid doing expensive stuff
             //   in the IPC thread.
-            thread::spawn(move || handle_ipc_cmd(&app_state_clone, command));
+            thread::spawn(move || handle_ipc_cmd(&context_clone, command));
         }
         Err(e) => {
             log::error!("Failed to read command from IPC: {:?}", e);
@@ -66,29 +70,31 @@ fn handle_conn(app_state: &AppState, server: &Socket, msg: Message) {
     }
 }
 
-pub fn setup_ipc(cur_profile_id: &str, app_state: &AppState) -> std::result::Result<(), io::Error> {
+pub fn setup_ipc(context: &AppContext) -> anyhow::Result<()> {
     log::trace!("Starting IPC server...");
-    let socket_name = get_ipc_socket_name(cur_profile_id, true)?;
+    let socket_name = get_ipc_socket_name(context.state
+                                              .cur_profile_id
+                                              .as_ref()
+                                              .context("Missing profile ID!")?, true)?;
 
     let server = Socket::new(Protocol::Rep0)?;
     server.listen(&socket_name)?;
     loop {
         let msg = server.recv()?;
-        let app_state = app_state.clone();
 
-        handle_conn(&app_state, &server, msg);
+        handle_conn(context, &server, msg);
     }
 }
 
-fn handle_ipc_cmd(app_state: &AppState, cmd: IPCCommand) {
+fn handle_ipc_cmd(context: &AppContext, cmd: IPCCommand) {
     log::trace!("Executing IPC command: {:?}", cmd);
 
     match cmd {
-        IPCCommand::FocusWindow(options) => handle_ipc_cmd_focus_window(app_state, options),
+        IPCCommand::FocusWindow(options) => handle_ipc_cmd_focus_window(context.state, options),
         IPCCommand::UpdateProfileList => {
-            match read_profiles(&app_state.config, &app_state.config_dir) {
+            match read_profiles(&context.state.config, &context.state.config_dir) {
                 Ok(profiles) => {
-                    if let Some(pid) = &app_state.cur_profile_id
+                    if let Some(pid) = &context.state.cur_profile_id
                         .as_ref()
                         .map(|it| it.clone()) {
                         // Notify updated profile list
@@ -107,7 +113,10 @@ fn handle_ipc_cmd(app_state: &AppState, cmd: IPCCommand) {
             write_native_event(NativeResponseEvent::CloseManager);
         }
         IPCCommand::UpdateOptions => {
-            native_notify_updated_options(app_state);
+            native_notify_updated_options(context.state);
+        }
+        IPCCommand::UpdateAvatars => {
+            update_and_native_notify_avatars(context);
         }
     }
 
@@ -148,12 +157,12 @@ pub enum IpcError {
     NetworkError(nng::Error)
 }
 
-fn send_ipc_cmd(app_state: &AppState, target_profile_id: &str, cmd: IPCCommand) -> std::result::Result<(), IpcError> {
+fn send_ipc_cmd(context: &AppContext, target_profile_id: &str, cmd: IPCCommand) -> std::result::Result<(), IpcError> {
     log::trace!("Sending IPC command {:?} to profile: {}", cmd, target_profile_id);
-    let cur_profile_id = &app_state.cur_profile_id;
-    if cur_profile_id.is_some() && cur_profile_id.as_ref().unwrap() == target_profile_id {
+    let cur_profile_id = context.state.cur_profile_id.as_deref();
+    if cur_profile_id.is_some() && cur_profile_id.unwrap() == target_profile_id {
         log::trace!("Fast-pathing IPC command...");
-        handle_ipc_cmd(app_state, cmd);
+        handle_ipc_cmd(context, cmd);
         Ok(())
     } else {
         let socket_name = get_ipc_socket_name(target_profile_id, false)
@@ -181,31 +190,38 @@ fn send_ipc_cmd(app_state: &AppState, target_profile_id: &str, cmd: IPCCommand) 
 }
 
 // Notify another instance to focus it's window
-pub fn notify_focus_window(app_state: &AppState, target_profile_id: &String, url: Option<String>) -> Result<(), IpcError> {
-    send_ipc_cmd(app_state, target_profile_id, IPCCommand::FocusWindow(FocusWindowCommand {
+pub fn notify_focus_window(context: &AppContext, target_profile_id: &String, url: Option<String>) -> Result<(), IpcError> {
+    send_ipc_cmd(context, target_profile_id, IPCCommand::FocusWindow(FocusWindowCommand {
         url
     }))
 }
 
-// Notify all other running instances to update their profile list
-pub fn notify_profile_changed(app_state: &AppState, profiles: &ProfilesIniState) {
+// Notify all running instances to update their profile list
+pub fn notify_profile_changed(context: &AppContext, profiles: &ProfilesIniState) {
     for profile in &profiles.profile_entries {
-        send_ipc_cmd(app_state, &profile.id, IPCCommand::UpdateProfileList);
+        send_ipc_cmd(context, &profile.id, IPCCommand::UpdateProfileList);
     }
 }
 
-// Notify all other running instances to update their options
-pub fn notify_options_changed(app_state: &AppState, profiles: &ProfilesIniState) {
+// Notify all running instances to update their options
+pub fn notify_options_changed(context: &AppContext, profiles: &ProfilesIniState) {
     for profile in &profiles.profile_entries {
-        send_ipc_cmd(app_state, &profile.id, IPCCommand::UpdateOptions);
+        send_ipc_cmd(context, &profile.id, IPCCommand::UpdateOptions);
     }
 }
 
 // Notify all other running instances to close their managers
-pub fn notify_close_manager(app_state: &AppState, profiles: &ProfilesIniState) {
+pub fn notify_close_manager(context: &AppContext, profiles: &ProfilesIniState) {
     for profile in &profiles.profile_entries {
-        if Some(&profile.id) != app_state.cur_profile_id.as_ref() {
-            send_ipc_cmd(app_state, &profile.id, IPCCommand::CloseManager);
+        if Some(&profile.id) != context.state.cur_profile_id.as_ref() {
+            send_ipc_cmd(context, &profile.id, IPCCommand::CloseManager);
         }
+    }
+}
+
+// Notify all running instances to update their avatars
+pub fn notify_update_avatars(context: &AppContext, profiles: &ProfilesIniState) {
+    for profile in &profiles.profile_entries {
+        send_ipc_cmd(context, &profile.id, IPCCommand::UpdateAvatars);
     }
 }

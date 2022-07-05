@@ -2,16 +2,15 @@ use crate::state::AppState;
 use crate::profiles::{ProfilesIniState, write_profiles};
 use crate::native_req::NativeMessageInitialize;
 use crate::native_resp::{NativeResponse, NativeResponseData, NativeResponseEvent, NativeResponseProfileListProfileEntry, write_native_event};
-use std::{thread, fs};
-use crate::ipc::setup_ipc;
+use std::{fs};
 use crate::options::native_notify_updated_options;
 
 pub fn process_cmd_initialize(app_state: &mut AppState,
-                              profiles: &mut ProfilesIniState,
+                              mut profiles: ProfilesIniState,
                               msg: NativeMessageInitialize) -> NativeResponse {
     if let Some(profile_id) = &msg.profile_id {
         log::trace!("Profile ID was provided by extension: {}", profile_id);
-        finish_init(app_state, profiles, profile_id, msg.extension_id);
+        finish_init(app_state, &mut profiles, profile_id, msg.extension_id);
         return NativeResponse::success(NativeResponseData::Initialized { cached: true })
     }
 
@@ -38,7 +37,7 @@ pub fn process_cmd_initialize(app_state: &mut AppState,
         if ext_installed {
             let profile_id = profile.id.clone();
             log::trace!("Profile ID determined: {}", profile_id);
-            finish_init(app_state, profiles, &profile_id, msg.extension_id);
+            finish_init(app_state, &mut profiles, &profile_id, msg.extension_id);
             return NativeResponse::success(NativeResponseData::Initialized { cached: false })
         }
     }
@@ -78,16 +77,5 @@ fn finish_init(app_state: &mut AppState, profiles: &mut ProfilesIniState, profil
 
     // Notify extension of current options
     native_notify_updated_options(app_state);
-
-    // Begin IPC
-    {
-        let profile_id = profile_id.to_owned();
-        let app_state = app_state.clone();
-        thread::spawn(move || {
-            if let Err(e) = setup_ipc(&profile_id, &app_state) {
-                log::error!("Failed to setup IPC server: {:?}", e);
-            }
-        });
-    }
 }
 

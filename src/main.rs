@@ -7,6 +7,8 @@ mod native_resp;
 mod ipc;
 mod cmd;
 mod process;
+mod windowing;
+mod avatars;
 
 extern crate ini;
 extern crate serde;
@@ -34,24 +36,34 @@ cfg_if! {
     }
 }
 
-use std::{io, env};
+use std::{io, env, thread};
+use std::collections::HashMap;
 use std::fs;
+use std::sync::{Arc, RwLock};
 use cfg_if::cfg_if;
 use directories::ProjectDirs;
+use indexmap::IndexMap;
 use rand::Rng;
+use crate::avatars::update_and_native_notify_avatars;
 use crate::config::{read_configuration};
-use crate::profiles::read_profiles;
-use crate::state::AppState;
+use crate::state::{AppContext, AppState};
 use crate::native_resp::{NativeResponseEvent, write_native_response, NativeResponseWrapper, NativeResponse, write_native_event};
-use crate::cmd::execute_cmd_for_message;
-use crate::native_req::{read_incoming_message, NativeMessage};
+use crate::cmd::{execute_cmd_for_message, execute_init_cmd};
+use crate::ipc::setup_ipc;
+use crate::native_req::{read_incoming_message};
+use crate::windowing::Windowing;
 
 const APP_VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-// This is the application state, it will be immutable through the life of the application
+// This is the application state, it will be (mostly) immutable through the life of the application
 mod state {
+    use std::collections::HashMap;
     use crate::config::Config;
     use std::path::PathBuf;
+    use std::sync::{Arc, RwLock};
+    use indexmap::IndexMap;
+    use ulid::Ulid;
+    use crate::windowing::WindowingHandle;
 
     #[derive(Clone, Debug)]
     pub struct AppState {
@@ -61,7 +73,14 @@ mod state {
         pub extension_id: Option<String>,
         pub internal_extension_id: Option<String>,
         pub config_dir: PathBuf,
-        pub data_dir: PathBuf
+        pub data_dir: PathBuf,
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct AppContext {
+        pub state: &'static AppState,
+        pub windowing: WindowingHandle,
+        pub avatars: Arc<RwLock<IndexMap<Ulid, PathBuf>>>
     }
 }
 
@@ -147,6 +166,8 @@ fn main() {
 
     log::trace!("Configuration loaded: {:?}", &config);
 
+    let windowing = Windowing::new();
+
     let mut app_state = AppState {
         config,
         first_run,
@@ -154,53 +175,116 @@ fn main() {
         extension_id: extension_id.cloned(),
         internal_extension_id: None,
         config_dir: pref_dir.to_path_buf(),
-        data_dir: data_dir.to_path_buf()
+        data_dir: data_dir.to_path_buf(),
     };
 
-    log::trace!("Entering main loop, initial application state: {:?}", &app_state);
+    log::trace!("Entering initialization loop, initial application state: {:?}", &app_state);
 
+    // Init loop, at this time, we only accept init messages
     loop {
-        let message = read_incoming_message(&mut io::stdin());
+        let message = match read_incoming_message(&mut io::stdin()) {
+            Ok(m) => m,
+            Err(e) => {
+                log::error!("Failed to deserialize incoming message: {:?}", e);
+                // Best to restart here because maybe our IO went out of sync
+                panic!("Forcing restart due to deserialization failure.");
+            }
+        };
 
-        log::trace!("Received message, processing: {:?}", &message);
+        log::trace!("Received possible init message, processing: {:?}", &message);
 
-        /*
-        // TODO Lock SI when updating profile list over IPC
-        // SI lock
-        let lock_path = data_dir.join("si.lock");
-        // Create/open SI lockfile
-        let lock_file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open(&lock_path)
-            .expect("Failed to open single-instance lock!");
-        // Lock the lockfile
-        lock_file.lock_exclusive()
-            .expect("Failed to grab single-instance lock!");
-         */
-
-        let response = process_message(&mut app_state, message.msg);
+        let response = execute_init_cmd(&mut app_state, message.msg);
 
         log::trace!("Message {} processed, response is: {:?}", &message.id, &response);
+
+        let init_ok = match response {
+            NativeResponse::Success { .. } => true,
+            _ => false
+        };
 
         write_native_response(NativeResponseWrapper {
             id: message.id,
             resp: response
         });
 
-        log::trace!("Response written for message {}, waiting for next message.", &message.id);
-    }
-}
+        log::trace!("Response written for message {}", &message.id);
 
-fn process_message(app_state: &mut AppState, msg: NativeMessage) -> NativeResponse {
-    let mut profiles = match read_profiles(&app_state.config, &app_state.config_dir) {
-        Ok(p) => p,
-        Err(e) => {
-            return NativeResponse::error_with_dbg_msg("Failed to load profile list.", e);
+        if init_ok {
+            break;
         }
+    }
+
+    // No longer initing, we accept any type of message now (except init messages).
+
+    log::trace!("Connector initialized, application state is now frozen, enter main loop.");
+
+    // Leak the app state because we need to read it from multiple threads
+    let app_state_leaked = Box::leak(Box::new(app_state));
+
+    let context = AppContext {
+        state: &*app_state_leaked,
+        windowing: windowing.get_handle(),
+        avatars: Arc::new(RwLock::new(IndexMap::new()))
     };
 
-    log::trace!("Profile list processed!");
+    update_and_native_notify_avatars(&context);
 
-    execute_cmd_for_message(app_state, &mut profiles, msg)
+    // Begin IPC
+    let context_clone = context.clone();
+    thread::spawn(move || {
+        if let Err(e) = setup_ipc(&context_clone) {
+            log::error!("Failed to setup IPC server: {:?}", e);
+        }
+    });
+
+    thread::spawn(move || {
+        let pool = threadfin::builder()
+            .size(1..50)
+            .build();
+
+        loop {
+            let message = match read_incoming_message(&mut io::stdin()) {
+                Ok(m) => m,
+                Err(e) => {
+                    log::error!("Failed to deserialize incoming message: {:?}", e);
+                    // Best to restart here because maybe our IO went out of sync
+                    panic!("Forcing restart due to deserialization failure.");
+                }
+            };
+
+            log::trace!("Received message, processing: {:?}", &message);
+
+            let context_clone = context.clone();
+
+            pool.execute(move || {
+                /*
+                // TODO Lock SI when updating profile list over IPC
+                // SI lock
+                let lock_path = data_dir.join("si.lock");
+                // Create/open SI lockfile
+                let lock_file = OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .open(&lock_path)
+                    .expect("Failed to open single-instance lock!");
+                // Lock the lockfile
+                lock_file.lock_exclusive()
+                    .expect("Failed to grab single-instance lock!");
+                 */
+
+                let response = execute_cmd_for_message(&context_clone, message.msg);
+
+                log::trace!("Message {} processed, response is: {:?}", &message.id, &response);
+
+                write_native_response(NativeResponseWrapper {
+                    id: message.id,
+                    resp: response
+                });
+
+                log::trace!("Response written for message {}.", &message.id);
+            });
+        }
+    });
+
+    windowing.run_event_loop();
 }

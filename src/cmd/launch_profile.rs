@@ -1,11 +1,11 @@
-use crate::state::AppState;
+use crate::AppContext;
 use crate::profiles::ProfilesIniState;
 use crate::native_req::NativeMessageLaunchProfile;
 use crate::native_resp::{NativeResponse, NativeResponseData};
 use crate::ipc::notify_focus_window;
 use crate::process::{fork_browser_proc, ForkBrowserProcError};
 
-pub fn process_cmd_launch_profile(app_state: &AppState,
+pub fn process_cmd_launch_profile(context: &AppContext,
                               profiles: &ProfilesIniState,
                               msg: NativeMessageLaunchProfile) -> NativeResponse {
     // Match ID with profile
@@ -16,12 +16,12 @@ pub fn process_cmd_launch_profile(app_state: &AppState,
 
     log::trace!("Launching profile: {}", profile.id);
 
-    match notify_focus_window(app_state, &msg.profile_id, msg.url.clone()) {
+    match notify_focus_window(context, &msg.profile_id, msg.url.clone()) {
         Ok(_) => { return NativeResponse::success(NativeResponseData::ProfileLaunched); }
         Err(e) => { log::info!("Failed to focus current browser window, launching new window: {:?}", e); }
     }
 
-    match fork_browser_proc(app_state, profile, msg.url) {
+    match fork_browser_proc(context.state, profile, msg.url) {
         Ok(_) => NativeResponse::success(NativeResponseData::ProfileLaunched),
         Err(e) => match e {
             ForkBrowserProcError::BadExitCode => NativeResponse::error_with_dbg_msg("Failed to launch browser with new profile (bad exit code)!", e),

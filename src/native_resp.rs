@@ -43,24 +43,24 @@ impl NativeResponseWrapper {
 }
 
 impl NativeResponse {
-    pub fn error(msg: &str) -> NativeResponse {
+    pub fn error<S: Into<String>>(msg: S) -> NativeResponse {
         NativeResponse::Error {
             success: false,
-            error: String::from(msg),
+            error: msg.into(),
             debug_msg: None
         }
     }
-    pub fn error_with_dbg_msg(msg: &str, err: impl Debug) -> NativeResponse {
+    pub fn error_with_dbg_msg<S: Into<String>>(msg: S, err: impl Debug) -> NativeResponse {
         NativeResponse::Error {
             success: false,
-            error: String::from(msg),
+            error: msg.into(),
             debug_msg: Some(format!("{:?}", err))
         }
     }
-    pub fn error_with_dbg_str(msg: &str, err: String) -> NativeResponse {
+    pub fn error_with_dbg_str<S: Into<String>>(msg: S, err: String) -> NativeResponse {
         NativeResponse::Error {
             success: false,
-            error: String::from(msg),
+            error: msg.into(),
             debug_msg: Some(err)
         }
     }
@@ -113,7 +113,10 @@ pub enum NativeResponseData {
     OptionsUpdated {
         options: HashMap<String, Value>
     },
-    ManagerClosed
+    ManagerClosed,
+    AvatarsUpdated,
+    GetAvatarResult { data: String, mime: String },
+    AvatarDeleted,
 }
 
 #[derive(Serialize, Debug)]
@@ -123,14 +126,14 @@ pub enum NativeResponseEvent {
     FocusWindow { url: Option<String> },
     CloseManager,
     ConnectorInformation { version: String },
-    OptionsUpdated { options: HashMap<String, Value> }
+    OptionsUpdated { options: HashMap<String, Value> },
+    AvatarsUpdated { avatars: Vec<String> },
 }
 
 pub fn write_native_response(resp: NativeResponseWrapper) {
     let serialized = serde_json::to_vec(&resp).unwrap();
     // TODO Handle error
-    let stdout = io::stdout();
-    let mut handle = stdout.lock();
+    let mut handle = io::stdout().lock();
     handle.write_u32::<NativeEndian>(serialized.len() as u32);
     handle.write_all(&serialized);
     handle.flush();

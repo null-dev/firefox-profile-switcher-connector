@@ -1,10 +1,10 @@
-use crate::state::AppState;
+use crate::AppContext;
 use crate::profiles::{ProfilesIniState, write_profiles};
 use crate::native_req::NativeMessageUpdateProfile;
 use crate::native_resp::{NativeResponse, NativeResponseProfileListProfileEntry, NativeResponseData};
 use crate::ipc::notify_profile_changed;
 
-pub fn process_cmd_update_profile(app_state: &AppState, profiles: &mut ProfilesIniState, msg: NativeMessageUpdateProfile) -> NativeResponse {
+pub fn process_cmd_update_profile(context: &AppContext, mut profiles: ProfilesIniState, msg: NativeMessageUpdateProfile) -> NativeResponse {
     let new_trimmed_name = msg.name.trim();
     let name_conflict = profiles.profile_entries.iter()
         .filter(|p| p.id != msg.profile_id)
@@ -43,10 +43,10 @@ pub fn process_cmd_update_profile(app_state: &AppState, profiles: &mut ProfilesI
         }
     }
 
-    if let Err(e) = write_profiles(&app_state.config, &app_state.config_dir, profiles) {
+    if let Err(e) = write_profiles(&context.state.config, &context.state.config_dir, &profiles) {
         return NativeResponse::error_with_dbg_msg("Failed to save new changes!", e);
     }
-    notify_profile_changed(app_state, profiles);
+    notify_profile_changed(context, &profiles);
 
     return NativeResponse::success(NativeResponseData::ProfileUpdated { profile: resp })
 }

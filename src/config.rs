@@ -1,11 +1,10 @@
 // === CONFIG ===
 
-use std::path::{Component, PathBuf};
+use std::path::{PathBuf};
 use serde::{Deserialize, Serialize};
 use cfg_if::cfg_if;
 use std::fs::OpenOptions;
 use once_cell::sync::Lazy;
-use crate::process::get_parent_proc_path;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {

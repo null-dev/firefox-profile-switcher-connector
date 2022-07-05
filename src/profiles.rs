@@ -231,7 +231,7 @@ pub fn write_profiles(config: &Config, config_dir: &Path, state: &ProfilesIniSta
         let installs_conf = Ini::load_from_file_opt(config.installs_ini_path(), MOZ_INI_PARSE_OPTION);
         if let Ok(mut installs_conf) = installs_conf {
             for (sec, prop) in &mut installs_conf {
-                if let Some(sec) = sec {
+                if let Some(_) = sec {
                     if prop.contains_key("Default") {
                         prop.insert("Default", default_profile_path);
                         prop.insert("Locked", "0");
