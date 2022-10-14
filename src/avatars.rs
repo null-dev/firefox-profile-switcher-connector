@@ -1,13 +1,13 @@
-use std::{cmp, fs};
-use std::fs::{DirEntry};
+use crate::storage::custom_avatars_path;
+use crate::{write_native_event, AppContext, NativeResponseEvent};
+use base64::STANDARD_NO_PAD;
+use indexmap::IndexMap;
+use std::fs::DirEntry;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::SystemTime;
-use base64::STANDARD_NO_PAD;
-use indexmap::IndexMap;
+use std::{cmp, fs};
 use ulid::Ulid;
-use crate::{AppContext, NativeResponseEvent, write_native_event};
-use crate::storage::custom_avatars_path;
 
 pub fn build_avatar_path(custom_avatars_path: &Path, ulid: Ulid, ext: &str) -> PathBuf {
     let filename = ulid.to_string() + "." + ext;
@@ -17,15 +17,19 @@ pub fn build_avatar_path(custom_avatars_path: &Path, ulid: Ulid, ext: &str) -> P
 pub fn list_avatars(custom_avatars_path: &Path) -> IndexMap<Ulid, PathBuf> {
     if let Ok(r) = fs::read_dir(custom_avatars_path) {
         // Sort by creation time descending
-        let mut dir_entries: Vec<(DirEntry, SystemTime)> = r.filter_map(|f| f.ok())
+        let mut dir_entries: Vec<(DirEntry, SystemTime)> = r
+            .filter_map(|f| f.ok())
             .map(|e| {
-                let t = e.metadata()
+                let t = e
+                    .metadata()
                     .and_then(|m| m.created())
                     .unwrap_or(SystemTime::UNIX_EPOCH);
                 (e, t)
             })
             .collect();
+
         dir_entries.sort_by_key(|p| cmp::Reverse(p.1));
+
         return dir_entries
             .iter()
             .filter_map(|f| {
@@ -35,10 +39,10 @@ pub fn list_avatars(custom_avatars_path: &Path) -> IndexMap<Ulid, PathBuf> {
                     .and_then(|f| Ulid::from_str(f).ok())
                     .map(|ulid| (ulid, path))
             })
-            .collect()
+            .collect();
     }
 
-    return IndexMap::new()
+    IndexMap::new()
 }
 
 pub fn update_and_native_notify_avatars(context: &AppContext) {
@@ -50,7 +54,7 @@ pub fn update_and_native_notify_avatars(context: &AppContext) {
     *context.avatars.write().unwrap() = avatars;
 
     write_native_event(NativeResponseEvent::AvatarsUpdated {
-        avatars: avatars_as_ulids
+        avatars: avatars_as_ulids,
     });
 }
 

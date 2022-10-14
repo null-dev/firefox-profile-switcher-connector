@@ -1,43 +1,44 @@
-use std::path::PathBuf;
-use winit::event_loop::{ControlFlow, EventLoop, EventLoopProxy};
 use crossbeam_channel::unbounded as unbounded_channel;
 use directories::UserDirs;
 use rfd::FileDialog;
+use std::path::PathBuf;
+use winit::event_loop::{ControlFlow, EventLoop, EventLoopProxy};
 
 pub struct Windowing {
-    event_loop: EventLoop<UserEvent>
+    event_loop: EventLoop<UserEvent>,
 }
 
 #[derive(Clone, Debug)]
 pub struct WindowingHandle {
-    event_loop_proxy: EventLoopProxy<UserEvent>
+    event_loop_proxy: EventLoopProxy<UserEvent>,
 }
 
 struct UserEvent {
-    task: Box<dyn FnOnce() + Send>
+    task: Box<dyn FnOnce() + Send>,
 }
 
 impl Windowing {
     pub fn new() -> Self {
-        Self { event_loop: EventLoop::with_user_event() }
+        Self {
+            event_loop: EventLoop::with_user_event(),
+        }
     }
 
     pub fn run_event_loop(self) {
         self.event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Wait;
 
-            match event {
-                winit::event::Event::UserEvent(evt) => {
-                    let task = evt.task;
-                    task();
-                },
-                _ => (),
+            if let winit::event::Event::UserEvent(evt) = event {
+                let task = evt.task;
+                task();
             }
         });
     }
 
     pub fn get_handle(&self) -> WindowingHandle {
-        WindowingHandle { event_loop_proxy: self.event_loop.create_proxy() }
+        WindowingHandle {
+            event_loop_proxy: self.event_loop.create_proxy(),
+        }
     }
 }
 
@@ -62,18 +63,29 @@ impl WindowingHandle {
     }
 
     fn exec_on_main_thread<T: FnOnce() -> Z, Z>(&self, task: T) -> Z
-        where T: Send + 'static,
-              Z: Send + 'static {
+    where
+        T: Send + 'static,
+        Z: Send + 'static,
+    {
         let (sender, receiver) = unbounded_channel::<Z>();
-        if self.event_loop_proxy.send_event(UserEvent {
-            task: Box::new(move || {
-                let result = task();
-                sender.send(result)
-                    .expect("failed to send message from main thread");
+        if self
+            .event_loop_proxy
+            .send_event(UserEvent {
+                task: Box::new(move || {
+                    let result = task();
+
+                    sender
+                        .send(result)
+                        .expect("failed to send message from main thread");
+                }),
             })
-        }).is_err() {
+            .is_err()
+        {
             panic!("main thread died?");
         };
-        receiver.recv().expect("failed to receive result from main thread")
+
+        receiver
+            .recv()
+            .expect("failed to receive result from main thread")
     }
 }

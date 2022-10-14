@@ -1,18 +1,20 @@
-use std::{io, thread};
-use crate::state::AppState;
-use std::time::Duration;
-use anyhow::Context;
-use crate::native_resp::{NativeResponseEvent, NativeResponseProfileListProfileEntry, write_native_event};
-use crate::profiles::{read_profiles, ProfilesIniState};
-use crate::options::{read_global_options, native_notify_updated_options};
-use crate::storage::{global_options_data_path};
-use cfg_if::cfg_if;
-use nng::{Message, Protocol, Socket};
-use nng::options::{Options, RecvTimeout, SendTimeout};
-use serde::{Serialize, Deserialize};
-use crate::AppContext;
-use crate::avatars::{update_and_native_notify_avatars};
+use crate::avatars::update_and_native_notify_avatars;
+use crate::native_resp::{
+    write_native_event, NativeResponseEvent, NativeResponseProfileListProfileEntry,
+};
+use crate::options::{native_notify_updated_options, read_global_options};
 use crate::process::fork_browser_proc;
+use crate::profiles::{read_profiles, ProfilesIniState};
+use crate::state::AppState;
+use crate::storage::global_options_data_path;
+use crate::AppContext;
+use anyhow::Context;
+use cfg_if::cfg_if;
+use nng::options::{Options, RecvTimeout, SendTimeout};
+use nng::{Message, Protocol, Socket};
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use std::{io, thread};
 
 // === IPC ===
 #[derive(Serialize, Deserialize, Debug)]
@@ -24,11 +26,13 @@ enum IPCCommand {
     UpdateOptions,
     UpdateAvatars,
 }
+
 #[derive(Serialize, Deserialize, Debug)]
 struct FocusWindowCommand {
-    url: Option<String>
+    url: Option<String>,
 }
-fn get_ipc_socket_name(profile_id: &str, reset: bool) -> io::Result<String> {
+
+fn get_ipc_socket_name(profile_id: &str, _reset: bool) -> io::Result<String> {
     cfg_if! {
         if #[cfg(target_family = "unix")] {
             // TODO Somehow delete unix socket afterwards? IDK, could break everything if new instance starts before we delete socket
@@ -38,7 +42,8 @@ fn get_ipc_socket_name(profile_id: &str, reset: bool) -> io::Result<String> {
         } else if #[cfg(target_family = "windows")] {
             let name = format!("ipc://fps-profile_{}", profile_id);
             log::trace!("IPC pipe for profile {:?} resolved to: {:?}", profile_id, name);
-            return Ok(name);
+
+            Ok(name)
         } else {
             compile_error!("Unknown OS!");
         }
@@ -58,7 +63,7 @@ fn handle_conn(context: &AppContext, server: &Socket, msg: Message) {
         }
         Err(e) => {
             log::error!("Failed to read command from IPC: {:?}", e);
-            return
+            return;
         }
     }
 
@@ -66,19 +71,23 @@ fn handle_conn(context: &AppContext, server: &Socket, msg: Message) {
     // Write command status
     if let Err(e) = server.send(Message::from([0])) {
         log::error!("IPC error while writing command status: {:?}", e);
-        return
     }
 }
 
 pub fn setup_ipc(context: &AppContext) -> anyhow::Result<()> {
     log::trace!("Starting IPC server...");
-    let socket_name = get_ipc_socket_name(context.state
-                                              .cur_profile_id
-                                              .as_ref()
-                                              .context("Missing profile ID!")?, true)?;
+    let socket_name = get_ipc_socket_name(
+        context
+            .state
+            .cur_profile_id
+            .as_ref()
+            .context("Missing profile ID!")?,
+        true,
+    )?;
 
     let server = Socket::new(Protocol::Rep0)?;
     server.listen(&socket_name)?;
+
     loop {
         let msg = server.recv()?;
 
@@ -94,16 +103,18 @@ fn handle_ipc_cmd(context: &AppContext, cmd: IPCCommand) {
         IPCCommand::UpdateProfileList => {
             match read_profiles(&context.state.config, &context.state.config_dir) {
                 Ok(profiles) => {
-                    if let Some(pid) = &context.state.cur_profile_id
-                        .as_ref()
-                        .map(|it| it.clone()) {
+                    if let Some(pid) = &context.state.cur_profile_id.as_ref().cloned() {
                         // Notify updated profile list
                         write_native_event(NativeResponseEvent::ProfileList {
                             current_profile_id: pid.to_owned(),
-                            profiles: profiles.profile_entries.iter().map(NativeResponseProfileListProfileEntry::from_profile_entry).collect()
+                            profiles: profiles
+                                .profile_entries
+                                .iter()
+                                .map(NativeResponseProfileListProfileEntry::from_profile_entry)
+                                .collect(),
                         });
                     }
-                },
+                }
                 Err(e) => {
                     log::error!("Failed to update profile list: {:?}", e);
                 }
@@ -126,16 +137,24 @@ fn handle_ipc_cmd(context: &AppContext, cmd: IPCCommand) {
 fn handle_ipc_cmd_focus_window(app_state: &AppState, cmd: FocusWindowCommand) {
     if let Some(extension_id) = app_state.internal_extension_id.as_ref() {
         if let Some(cur_profile_id) = app_state.cur_profile_id.as_ref() {
-            let global_options = read_global_options(&global_options_data_path(&app_state.config_dir));
+            let global_options =
+                read_global_options(&global_options_data_path(&app_state.config_dir));
+
             if global_options["windowFocusWorkaround"] == serde_json::Value::Bool(true) {
                 if let Ok(profiles) = read_profiles(&app_state.config, &app_state.config_dir) {
-                    if let Some(cur_profile) = profiles.profile_entries
+                    if let Some(cur_profile) = profiles
+                        .profile_entries
                         .iter()
-                        .find(|e| &e.id == cur_profile_id) {
+                        .find(|e| &e.id == cur_profile_id)
+                    {
                         let url = match cmd.url {
                             Some(url) => url,
-                            None => format!("moz-extension://{}/js/winfocus/winfocus.html", extension_id)
+                            None => format!(
+                                "moz-extension://{}/js/winfocus/winfocus.html",
+                                extension_id
+                            ),
                         };
+
                         fork_browser_proc(app_state, cur_profile, Some(url));
                         return;
                     }
@@ -143,10 +162,9 @@ fn handle_ipc_cmd_focus_window(app_state: &AppState, cmd: FocusWindowCommand) {
             }
         }
     }
+
     // Focus window
-    write_native_event(NativeResponseEvent::FocusWindow {
-        url: cmd.url
-    });
+    write_native_event(NativeResponseEvent::FocusWindow { url: cmd.url });
 }
 
 #[derive(Debug)]
@@ -154,33 +172,48 @@ pub enum IpcError {
     BadStatus,
     SerializationError(serde_cbor::Error),
     IoError(io::Error),
-    NetworkError(nng::Error)
+    NetworkError(nng::Error),
 }
 
-fn send_ipc_cmd(context: &AppContext, target_profile_id: &str, cmd: IPCCommand) -> std::result::Result<(), IpcError> {
-    log::trace!("Sending IPC command {:?} to profile: {}", cmd, target_profile_id);
+fn send_ipc_cmd(
+    context: &AppContext,
+    target_profile_id: &str,
+    cmd: IPCCommand,
+) -> Result<(), IpcError> {
+    log::trace!(
+        "Sending IPC command {:?} to profile: {}",
+        cmd,
+        target_profile_id
+    );
+
     let cur_profile_id = context.state.cur_profile_id.as_deref();
     if cur_profile_id.is_some() && cur_profile_id.unwrap() == target_profile_id {
         log::trace!("Fast-pathing IPC command...");
         handle_ipc_cmd(context, cmd);
         Ok(())
     } else {
-        let socket_name = get_ipc_socket_name(target_profile_id, false)
-            .map_err(IpcError::IoError)?;
+        let socket_name =
+            get_ipc_socket_name(target_profile_id, false).map_err(IpcError::IoError)?;
 
         let conn = Socket::new(Protocol::Req0).map_err(IpcError::NetworkError)?;
+
         conn.set_opt::<SendTimeout>(Some(Duration::from_millis(500)));
         conn.set_opt::<RecvTimeout>(Some(Duration::from_millis(3000)));
+
         conn.dial(&socket_name).map_err(IpcError::NetworkError)?;
+
         log::trace!("Writing IPC command...");
-        let serialized = serde_cbor::to_vec(&cmd)
-            .map_err(IpcError::SerializationError)?;
+
+        let serialized = serde_cbor::to_vec(&cmd).map_err(IpcError::SerializationError)?;
         conn.send(Message::from(&serialized));
+
         log::trace!("IPC command written, reading status...");
-        let resp = conn.recv()
-            .map_err(IpcError::NetworkError)?;
+
+        let resp = conn.recv().map_err(IpcError::NetworkError)?;
         let status = resp.first().unwrap_or(&1);
+
         log::trace!("IPC command status is: {}", status);
+
         if *status == 0 {
             Ok(())
         } else {
@@ -190,10 +223,16 @@ fn send_ipc_cmd(context: &AppContext, target_profile_id: &str, cmd: IPCCommand) 
 }
 
 // Notify another instance to focus it's window
-pub fn notify_focus_window(context: &AppContext, target_profile_id: &String, url: Option<String>) -> Result<(), IpcError> {
-    send_ipc_cmd(context, target_profile_id, IPCCommand::FocusWindow(FocusWindowCommand {
-        url
-    }))
+pub fn notify_focus_window(
+    context: &AppContext,
+    target_profile_id: &str,
+    url: Option<String>,
+) -> Result<(), IpcError> {
+    send_ipc_cmd(
+        context,
+        target_profile_id,
+        IPCCommand::FocusWindow(FocusWindowCommand { url }),
+    )
 }
 
 // Notify all running instances to update their profile list
