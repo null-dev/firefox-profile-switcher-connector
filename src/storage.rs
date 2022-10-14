@@ -1,5 +1,5 @@
+use crate::AppContext;
 use std::path::{Path, PathBuf};
-use crate::{AppContext};
 
 pub fn global_options_data_path(config_dir: &Path) -> PathBuf {
     config_dir.join("global-options.json")

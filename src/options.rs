@@ -1,11 +1,11 @@
-use std::path::PathBuf;
-use std::collections::HashMap;
-use serde_json::Value;
-use std::fs::OpenOptions;
-use std::io;
-use crate::storage::global_options_data_path;
 use crate::native_resp::{write_native_event, NativeResponseEvent};
 use crate::state::AppState;
+use crate::storage::global_options_data_path;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io;
+use std::path::PathBuf;
 
 // === GLOBAL OPTIONS ===
 
@@ -24,11 +24,14 @@ pub fn read_global_options(path: &PathBuf) -> HashMap<String, Value> {
 #[derive(Debug)]
 pub enum WriteGlobalOptionsError {
     OpenFileError(io::Error),
-    WriteFileError(serde_json::Error)
+    WriteFileError(serde_json::Error),
 }
 
 //// Read global options to the specified file
-pub fn write_global_options(path: &PathBuf, new_options: &HashMap<String, Value>) -> Result<(), WriteGlobalOptionsError> {
+pub fn write_global_options(
+    path: &PathBuf,
+    new_options: &HashMap<String, Value>,
+) -> Result<(), WriteGlobalOptionsError> {
     let options_file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -41,10 +44,9 @@ pub fn write_global_options(path: &PathBuf, new_options: &HashMap<String, Value>
 }
 
 pub fn native_notify_updated_options(app_state: &AppState) {
-    let new_options = read_global_options(
-        &global_options_data_path(&app_state.config_dir));
+    let new_options = read_global_options(&global_options_data_path(&app_state.config_dir));
 
     write_native_event(NativeResponseEvent::OptionsUpdated {
-        options: new_options
+        options: new_options,
     });
 }

@@ -1,14 +1,22 @@
-use crate::profiles::{ProfilesIniState, write_profiles};
+use crate::ipc::notify_profile_changed;
 use crate::native_req::NativeMessageDeleteProfile;
 use crate::native_resp::{NativeResponse, NativeResponseData};
-use crate::ipc::notify_profile_changed;
-use std::fs;
+use crate::profiles::{write_profiles, ProfilesIniState};
 use crate::AppContext;
+use std::fs;
 
-pub fn process_cmd_delete_profile(context: &AppContext, mut profiles: ProfilesIniState, msg: NativeMessageDeleteProfile) -> NativeResponse {
-    let profile_index = match profiles.profile_entries.iter().position(|p| p.id == msg.profile_id) {
+pub fn process_cmd_delete_profile(
+    context: &AppContext,
+    mut profiles: ProfilesIniState,
+    msg: NativeMessageDeleteProfile,
+) -> NativeResponse {
+    let profile_index = match profiles
+        .profile_entries
+        .iter()
+        .position(|p| p.id == msg.profile_id)
+    {
         Some(p) => p,
-        None => return NativeResponse::error("No profile with the specified id could be found!")
+        None => return NativeResponse::error("No profile with the specified id could be found!"),
     };
 
     // Delete profile from profile list (but do not write new list yet)
@@ -20,15 +28,18 @@ pub fn process_cmd_delete_profile(context: &AppContext, mut profiles: ProfilesIn
     if [
         profile_path.join("cookies.sqlite-wal"),
         profile_path.join("webappsstore.sqlite-wal"),
-        profile_path.join("places.sqlite-wal")
-    ].iter().any(|file| file.exists()) {
+        profile_path.join("places.sqlite-wal"),
+    ]
+    .iter()
+    .any(|file| file.exists())
+    {
         return NativeResponse::error(
             concat!(
             "This profile is in use and therefore cannot be deleted, close the profile and try again.\n\n",
             "Alternatively, your browser may have crashed the last time you used this profile and the profile was never properly shut down, ",
             "you can try opening and closing the profile to resolve this issue."
             )
-        )
+        );
     }
 
     // Delete profile files
@@ -45,8 +56,8 @@ pub fn process_cmd_delete_profile(context: &AppContext, mut profiles: ProfilesIn
     if let Err(e) = write_profiles(&context.state.config, &context.state.config_dir, &profiles) {
         return NativeResponse::error_with_dbg_msg("Failed to save new changes!", e);
     }
+
     notify_profile_changed(context, &profiles);
 
-    return NativeResponse::success(NativeResponseData::ProfileDeleted)
+    NativeResponse::success(NativeResponseData::ProfileDeleted)
 }
-

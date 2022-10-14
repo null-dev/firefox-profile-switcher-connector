@@ -1,11 +1,11 @@
-use std::{io, env};
-use std::env::VarError;
-use cfg_if::cfg_if;
-use std::path::PathBuf;
-use std::process::{exit, Child, Command, Stdio};
-use once_cell::sync::Lazy;
-use crate::state::AppState;
 use crate::profiles::ProfileEntry;
+use crate::state::AppState;
+use cfg_if::cfg_if;
+use once_cell::sync::Lazy;
+use std::env::VarError;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::{env, io};
 
 cfg_if! {
     if #[cfg(target_family = "unix")] {
@@ -15,14 +15,12 @@ cfg_if! {
         use windows::Win32::System::Threading as win_threading;
         use windows::Win32::UI::Shell::{ApplicationActivationManager, IApplicationActivationManager, AO_NONE};
         use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
-        use windows::Win32::Foundation::PWSTR;
         use std::os::windows::process::CommandExt;
         use crate::config::get_msix_package;
     } else {
         compile_error!("Unknown OS!");
     }
 }
-
 
 #[derive(Debug)]
 pub enum ForkBrowserProcError {
@@ -32,10 +30,14 @@ pub enum ForkBrowserProcError {
     MSIXProcessLaunchError { error_message: String },
     BinaryNotFound,
     BinaryDoesNotExist,
-    COMError { error_message: String }
+    COMError { error_message: String },
 }
 
-pub fn fork_browser_proc(app_state: &AppState, profile: &ProfileEntry, url: Option<String>) -> Result<(), ForkBrowserProcError> {
+pub fn fork_browser_proc(
+    app_state: &AppState,
+    profile: &ProfileEntry,
+    url: Option<String>,
+) -> Result<(), ForkBrowserProcError> {
     // Special case on Windows when FF is installed from Microsoft Store
     cfg_if! {
         if #[cfg(target_family = "windows")] {
@@ -54,7 +56,7 @@ pub fn fork_browser_proc(app_state: &AppState, profile: &ProfileEntry, url: Opti
                     .iter()
                     // Surround each arg with quotes and escape quotes with triple quotes
                     // See: https://stackoverflow.com/questions/7760545/escape-double-quotes-in-parameter
-                    .map(|a| format!(r#""{}""#, a.replace(r#"""#, r#"""""#)))
+                    .map(|a| format!(r#""{}""#, a.replace('"', r#"""""#)))
                     .collect::<Vec<String>>()
                     .join(" ");
 
@@ -80,12 +82,12 @@ pub fn fork_browser_proc(app_state: &AppState, profile: &ProfileEntry, url: Opti
         Some(v) => v,
         None => match get_parent_proc_path() {
             Ok(v) => v,
-            Err(_) => return Err(ForkBrowserProcError::BinaryNotFound)
-        }
+            Err(_) => return Err(ForkBrowserProcError::BinaryNotFound),
+        },
     };
 
     if !parent_proc.exists() {
-        return Err(ForkBrowserProcError::BinaryDoesNotExist)
+        return Err(ForkBrowserProcError::BinaryDoesNotExist);
     }
 
     log::trace!("Browser binary found: {:?}", parent_proc);
@@ -122,7 +124,7 @@ pub fn fork_browser_proc(app_state: &AppState, profile: &ProfileEntry, url: Opti
             }
         } else if #[cfg(target_family = "windows")] {
             // TODO Change app ID to separate on taskbar?
-            match spawn_browser_proc(&parent_proc, browser_args) {
+            match spawn_browser_proc(parent_proc, browser_args) {
                 Ok(_) => Ok(()),
                 Err(e) => Err(ForkBrowserProcError::ProcessLaunchError(e))
             }
@@ -133,26 +135,27 @@ pub fn fork_browser_proc(app_state: &AppState, profile: &ProfileEntry, url: Opti
 }
 
 fn build_browser_args(profile_name: &str, url: Option<String>) -> Vec<String> {
-    let mut vec = vec![
-        "-P".to_owned(),
-        profile_name.to_owned()
-    ];
+    let mut vec = vec!["-P".to_owned(), profile_name.to_owned()];
     if let Some(url) = url {
         vec.push("--new-tab".to_owned());
         vec.push(url);
     }
+
     vec
 }
 
 fn spawn_browser_proc(bin_path: &PathBuf, args: Vec<String>) -> io::Result<Child> {
     let mut command = Command::new(bin_path);
+
     cfg_if! {
         if #[cfg(target_family = "windows")] {
             command.creation_flags((win_threading::DETACHED_PROCESS | win_threading::CREATE_BREAKAWAY_FROM_JOB).0);
         }
     }
+
     command.args(args);
     log::trace!("Executing command: {:?}", command);
+
     return command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -166,7 +169,7 @@ pub enum GetParentProcError {
     LinuxOpenCurProcFailed(io::Error),
     LinuxFailedToParsePidString(String),
     LinuxCouldNotFindPPid,
-    LinuxResolveParentExeFailed(io::Error)
+    LinuxResolveParentExeFailed(io::Error),
 }
 
 static PARENT_PROC: Lazy<Result<PathBuf, GetParentProcError>> = Lazy::new(|| {
