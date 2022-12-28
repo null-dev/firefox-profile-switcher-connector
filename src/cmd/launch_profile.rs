@@ -27,7 +27,7 @@ pub fn process_cmd_launch_profile(context: &AppContext,
             ForkBrowserProcError::BadExitCode => NativeResponse::error_with_dbg_msg("Failed to launch browser with new profile (bad exit code)!", e),
             ForkBrowserProcError::ForkError { .. } => NativeResponse::error_with_dbg_msg("Failed to launch browser with new profile (fork error)!", e),
             ForkBrowserProcError::ProcessLaunchError(_) => NativeResponse::error_with_dbg_msg("Failed to launch browser with new profile!", e),
-            ForkBrowserProcError::BinaryNotFound => NativeResponse::error_with_dbg_msg("Unable to find browser binary!", e),
+            ForkBrowserProcError::BinaryNotFound(_) => NativeResponse::error_with_dbg_msg("Unable to find browser binary!", e),
             ForkBrowserProcError::BinaryDoesNotExist => NativeResponse::error(concat!(
             "The version of your browser that is currently running can no longer be found. ",
             "This is usually because your browser has updated but you haven't restarted your browser recently to apply the update. ",

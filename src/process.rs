@@ -30,7 +30,7 @@ pub enum ForkBrowserProcError {
     ForkError { error_message: String },
     ProcessLaunchError(io::Error),
     MSIXProcessLaunchError { error_message: String },
-    BinaryNotFound,
+    BinaryNotFound(String),
     BinaryDoesNotExist,
     COMError { error_message: String }
 }
@@ -80,7 +80,7 @@ pub fn fork_browser_proc(app_state: &AppState, profile: &ProfileEntry, url: Opti
         Some(v) => v,
         None => match get_parent_proc_path() {
             Ok(v) => v,
-            Err(_) => return Err(ForkBrowserProcError::BinaryNotFound)
+            Err(e) => return Err(ForkBrowserProcError::BinaryNotFound(format!("{:?}", e)))
         }
     };
 
