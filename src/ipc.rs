@@ -1,18 +1,19 @@
 use std::{io, thread};
 use crate::state::AppState;
 use std::time::Duration;
-use anyhow::Context;
 use crate::native_resp::{NativeResponseEvent, NativeResponseProfileListProfileEntry, write_native_event};
 use crate::profiles::{read_profiles, ProfilesIniState};
 use crate::options::{read_global_options, native_notify_updated_options};
 use crate::storage::{global_options_data_path};
 use cfg_if::cfg_if;
+use eyre::ContextCompat;
 use nng::{Message, Protocol, Socket};
 use nng::options::{Options, RecvTimeout, SendTimeout};
 use serde::{Serialize, Deserialize};
 use crate::AppContext;
 use crate::avatars::{update_and_native_notify_avatars};
 use crate::process::fork_browser_proc;
+use crate::profiles_order::{native_notify_updated_profile_order, OrderData};
 
 // === IPC ===
 #[derive(Serialize, Deserialize, Debug)]
@@ -23,6 +24,7 @@ enum IPCCommand {
     CloseManager,
     UpdateOptions,
     UpdateAvatars,
+    UpdateProfileOrder,
 }
 #[derive(Serialize, Deserialize, Debug)]
 struct FocusWindowCommand {
@@ -70,7 +72,7 @@ fn handle_conn(context: &AppContext, server: &Socket, msg: Message) {
     }
 }
 
-pub fn setup_ipc(context: &AppContext) -> anyhow::Result<()> {
+pub fn setup_ipc(context: &AppContext) -> eyre::Result<()> {
     log::trace!("Starting IPC server...");
     let socket_name = get_ipc_socket_name(context.state
                                               .cur_profile_id
@@ -118,6 +120,9 @@ fn handle_ipc_cmd(context: &AppContext, cmd: IPCCommand) {
         IPCCommand::UpdateAvatars => {
             update_and_native_notify_avatars(context);
         }
+        IPCCommand::UpdateProfileOrder => {
+            native_notify_updated_profile_order(context.state);
+        }
     }
 
     log::trace!("Execution complete!");
@@ -134,7 +139,7 @@ fn handle_ipc_cmd_focus_window(app_state: &AppState, cmd: FocusWindowCommand) {
                         .find(|e| &e.id == cur_profile_id) {
                         let url = match cmd.url {
                             Some(url) => url,
-                            None => format!("moz-extension://{}/js/winfocus/winfocus.html", extension_id)
+                            None => format!("moz-extension://{}/src/entries/winfocus/index.html", extension_id)
                         };
                         fork_browser_proc(app_state, cur_profile, Some(url));
                         return;
@@ -223,5 +228,12 @@ pub fn notify_close_manager(context: &AppContext, profiles: &ProfilesIniState) {
 pub fn notify_update_avatars(context: &AppContext, profiles: &ProfilesIniState) {
     for profile in &profiles.profile_entries {
         send_ipc_cmd(context, &profile.id, IPCCommand::UpdateAvatars);
+    }
+}
+
+// Notify all running instances to update their profile order
+pub fn notify_update_profile_order(context: &AppContext, profiles: &ProfilesIniState) {
+    for profile in &profiles.profile_entries {
+        send_ipc_cmd(context, &profile.id, IPCCommand::UpdateProfileOrder);
     }
 }

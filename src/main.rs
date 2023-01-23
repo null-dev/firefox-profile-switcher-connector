@@ -2,6 +2,7 @@ mod options;
 mod config;
 mod storage;
 mod profiles;
+mod profiles_order;
 mod native_req;
 mod native_resp;
 mod ipc;
@@ -9,6 +10,7 @@ mod cmd;
 mod process;
 mod windowing;
 mod avatars;
+mod versions;
 
 extern crate ini;
 extern crate serde;
@@ -51,6 +53,7 @@ use crate::native_resp::{NativeResponseEvent, write_native_response, NativeRespo
 use crate::cmd::{execute_cmd_for_message, execute_init_cmd};
 use crate::ipc::setup_ipc;
 use crate::native_req::{read_incoming_message};
+use crate::profiles_order::native_notify_updated_profile_order;
 use crate::windowing::Windowing;
 
 const APP_VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -62,6 +65,7 @@ mod state {
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
     use indexmap::IndexMap;
+    use semver::Version;
     use ulid::Ulid;
     use crate::windowing::WindowingHandle;
 
@@ -71,6 +75,7 @@ mod state {
         pub first_run: bool,
         pub cur_profile_id: Option<String>,
         pub extension_id: Option<String>,
+        pub extension_version: Option<Version>,
         pub internal_extension_id: Option<String>,
         pub config_dir: PathBuf,
         pub data_dir: PathBuf,
@@ -87,6 +92,9 @@ mod state {
 // === MAIN ===
 
 fn main() {
+    // Automatically enable backtraces
+    env::set_var("RUST_BACKTRACE", "full");
+
     // Notify extension of our version
     write_native_event(NativeResponseEvent::ConnectorInformation {
         version: APP_VERSION.to_string()
@@ -173,6 +181,7 @@ fn main() {
         first_run,
         cur_profile_id: None,
         extension_id: extension_id.cloned(),
+        extension_version: None,
         internal_extension_id: None,
         config_dir: pref_dir.to_path_buf(),
         data_dir: data_dir.to_path_buf(),
@@ -228,6 +237,7 @@ fn main() {
     };
 
     update_and_native_notify_avatars(&context);
+    native_notify_updated_profile_order(context.state);
 
     // Begin IPC
     let context_clone = context.clone();

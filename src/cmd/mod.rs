@@ -8,6 +8,7 @@ mod close_manager;
 mod add_avatars;
 mod get_avatar;
 mod delete_avatar;
+mod update_profiles_order;
 
 use crate::state::AppState;
 use crate::native_req::NativeMessage;
@@ -20,9 +21,10 @@ use crate::cmd::update_profile::process_cmd_update_profile;
 use crate::cmd::update_options::process_cmd_update_options;
 use crate::cmd::close_manager::process_cmd_close_manager;
 use crate::{AppContext};
-use crate::cmd::add_avatars::process_add_avatars;
-use crate::cmd::delete_avatar::process_delete_avatar;
-use crate::cmd::get_avatar::process_get_avatar;
+use crate::cmd::add_avatars::process_cmd_add_avatars;
+use crate::cmd::delete_avatar::process_cmd_delete_avatar;
+use crate::cmd::get_avatar::process_cmd_get_avatar;
+use crate::cmd::update_profiles_order::process_cmd_update_profiles_order;
 use crate::profiles::read_profiles;
 
 // === COMMANDS ===
@@ -51,14 +53,15 @@ pub fn execute_cmd_for_message(context: &AppContext,
     let state = context.state;
     match msg {
         NativeMessage::Initialize(_) => NativeResponse::error("Connector cannot be initialized multiple times!"),
-        NativeMessage::LaunchProfile(msg) => process_cmd_launch_profile(context, &profiles!(state), msg),
+        NativeMessage::LaunchProfile(msg) => process_cmd_launch_profile(context, profiles!(state), msg),
         NativeMessage::CreateProfile(msg) => process_cmd_create_profile(context, profiles!(state), msg),
         NativeMessage::DeleteProfile(msg) => process_cmd_delete_profile(context, profiles!(state), msg),
         NativeMessage::UpdateProfile(msg) => process_cmd_update_profile(context, profiles!(state), msg),
-        NativeMessage::UpdateOptions(msg) => process_cmd_update_options(context, &profiles!(state), msg),
-        NativeMessage::CloseManager => process_cmd_close_manager(context, &profiles!(state)),
-        NativeMessage::AddAvatars => process_add_avatars(context, &profiles!(state)),
-        NativeMessage::GetAvatar(msg) => process_get_avatar(context, msg),
-        NativeMessage::DeleteAvatar(msg) => process_delete_avatar(context, msg, &profiles!(state)),
+        NativeMessage::UpdateOptions(msg) => process_cmd_update_options(context, profiles!(state), msg),
+        NativeMessage::CloseManager => process_cmd_close_manager(context, profiles!(state)),
+        NativeMessage::AddAvatars => process_cmd_add_avatars(context, profiles!(state)),
+        NativeMessage::GetAvatar(msg) => process_cmd_get_avatar(context, msg),
+        NativeMessage::DeleteAvatar(msg) => process_cmd_delete_avatar(context, profiles!(state), msg),
+        NativeMessage::UpdateProfileOrder(msg) => process_cmd_update_profiles_order(context, profiles!(state), msg)
     }
 }

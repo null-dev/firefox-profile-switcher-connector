@@ -9,7 +9,7 @@ use crate::native_req::{NativeMessageDeleteAvatar, NativeMessageGetAvatar};
 use crate::native_resp::NativeResponseData;
 use crate::profiles::ProfilesIniState;
 
-pub fn process_delete_avatar(context: &AppContext, msg: NativeMessageDeleteAvatar, profiles: &ProfilesIniState) -> NativeResponse {
+pub fn process_cmd_delete_avatar(context: &AppContext, profiles: ProfilesIniState, msg: NativeMessageDeleteAvatar) -> NativeResponse {
     let ulid = match Ulid::from_str(&msg.avatar) {
         Ok(u) => u,
         Err(e) => return NativeResponse::error_with_dbg_msg("Failed to parse avatar ID.", e),
@@ -25,7 +25,7 @@ pub fn process_delete_avatar(context: &AppContext, msg: NativeMessageDeleteAvata
         return NativeResponse::error_with_dbg_msg("Failed to delete avatar file.", e)
     }
 
-    notify_update_avatars(context, profiles);
+    notify_update_avatars(context, &profiles);
 
     return NativeResponse::success(NativeResponseData::AvatarDeleted)
 }

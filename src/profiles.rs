@@ -6,7 +6,7 @@ use std::path::{PathBuf, Path};
 use ini::{EscapePolicy, Ini, ParseOption};
 use std::io;
 use std::fs::OpenOptions;
-use crate::storage::{avatar_data_path, options_data_path};
+use crate::storage::{avatar_data_path, options_data_path, order_data_path};
 use ring::digest::{Context, SHA256};
 use data_encoding::HEXUPPER;
 
@@ -38,12 +38,12 @@ pub struct ProfilesIniState {
     pub profile_entries: Vec<ProfileEntry>
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 struct AvatarData {
     avatars: HashMap<String, String>
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 struct OptionsData {
     options: HashMap<String, HashMap<String, Value>>
 }
@@ -55,7 +55,7 @@ pub enum ReadProfilesError {
     AvatarStoreError(io::Error),
     BadAvatarStoreFormat(serde_json::Error),
     OptionsStoreError(io::Error),
-    BadOptionsStoreFormat(serde_json::Error)
+    BadOptionsStoreFormat(serde_json::Error),
 }
 
 const MOZ_INI_PARSE_OPTION: ParseOption = ParseOption {
@@ -80,7 +80,7 @@ pub fn read_profiles(config: &Config, config_dir: &Path) -> Result<ProfilesIniSt
             .map_err(ReadProfilesError::BadAvatarStoreFormat))
         .unwrap_or_else(|e| {
             log::warn!("Failed to read avatar data: {:?}, falling back to defaults", e);
-            AvatarData { avatars: HashMap::new() }
+            AvatarData::default()
         });
 
     let options_data: OptionsData = OpenOptions::new()
@@ -91,12 +91,12 @@ pub fn read_profiles(config: &Config, config_dir: &Path) -> Result<ProfilesIniSt
             .map_err(ReadProfilesError::BadOptionsStoreFormat))
         .unwrap_or_else(|e| {
             log::warn!("Failed to read options data: {:?}, falling back to defaults", e);
-            OptionsData { options: HashMap::new() }
+            OptionsData::default()
         });
 
     let mut state = ProfilesIniState {
         backing_ini: Ini::new(),
-        profile_entries: Vec::new()
+        profile_entries: Vec::new(),
     };
 
     for (sec, prop) in &profiles_conf {
@@ -157,7 +157,9 @@ pub enum WriteProfilesError {
     OpenAvatarFileError(io::Error),
     WriteAvatarFileError(serde_json::Error),
     OpenOptionsFileError(io::Error),
-    WriteOptionsFileError(serde_json::Error)
+    WriteOptionsFileError(serde_json::Error),
+    OpenOrderFileError(io::Error),
+    WriteOrderFileError(serde_json::Error),
 }
 pub fn write_profiles(config: &Config, config_dir: &Path, state: &ProfilesIniState) -> Result<(), WriteProfilesError> {
     // Build avatar data
@@ -252,4 +254,12 @@ pub fn calc_profile_id(path: &str, is_relative: bool) -> String {
     context.update(&[is_relative as u8]);
     context.update(path.as_bytes());
     return HEXUPPER.encode(context.finish().as_ref());
+}
+
+pub fn check_profile_active(profile_path: &Path) -> bool {
+    [
+        profile_path.join("cookies.sqlite-wal"),
+        profile_path.join("webappsstore.sqlite-wal"),
+        profile_path.join("places.sqlite-wal")
+    ].iter().any(|file| file.exists())
 }

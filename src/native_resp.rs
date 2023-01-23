@@ -117,6 +117,7 @@ pub enum NativeResponseData {
     AvatarsUpdated,
     GetAvatarResult { data: String, mime: String },
     AvatarDeleted,
+    ProfileOrderUpdated,
 }
 
 #[derive(Serialize, Debug)]
@@ -128,6 +129,7 @@ pub enum NativeResponseEvent {
     ConnectorInformation { version: String },
     OptionsUpdated { options: HashMap<String, Value> },
     AvatarsUpdated { avatars: Vec<String> },
+    ProfileOrderUpdated { order: Vec<String> },
 }
 
 pub fn write_native_response(resp: NativeResponseWrapper) {

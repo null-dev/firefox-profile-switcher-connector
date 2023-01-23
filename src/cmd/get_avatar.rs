@@ -6,7 +6,7 @@ use crate::avatars::encode_avatar_to_string;
 use crate::native_req::NativeMessageGetAvatar;
 use crate::native_resp::NativeResponseData;
 
-pub fn process_get_avatar(context: &AppContext, msg: NativeMessageGetAvatar) -> NativeResponse {
+pub fn process_cmd_get_avatar(context: &AppContext, msg: NativeMessageGetAvatar) -> NativeResponse {
     let ulid = match Ulid::from_str(&msg.avatar) {
         Ok(u) => u,
         Err(e) => return NativeResponse::error_with_dbg_msg("Failed to parse avatar ID.", e),

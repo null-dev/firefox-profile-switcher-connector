@@ -3,6 +3,7 @@ use crate::profiles::{ProfilesIniState, write_profiles};
 use crate::native_req::NativeMessageInitialize;
 use crate::native_resp::{NativeResponse, NativeResponseData, NativeResponseEvent, NativeResponseProfileListProfileEntry, write_native_event};
 use std::{fs};
+use semver::Version;
 use crate::options::native_notify_updated_options;
 
 pub fn process_cmd_initialize(app_state: &mut AppState,
@@ -10,7 +11,7 @@ pub fn process_cmd_initialize(app_state: &mut AppState,
                               msg: NativeMessageInitialize) -> NativeResponse {
     if let Some(profile_id) = &msg.profile_id {
         log::trace!("Profile ID was provided by extension: {}", profile_id);
-        finish_init(app_state, &mut profiles, profile_id, msg.extension_id);
+        finish_init(app_state, &mut profiles, profile_id, msg.extension_id, msg.extension_version);
         return NativeResponse::success(NativeResponseData::Initialized { cached: true })
     }
 
@@ -37,7 +38,7 @@ pub fn process_cmd_initialize(app_state: &mut AppState,
         if ext_installed {
             let profile_id = profile.id.clone();
             log::trace!("Profile ID determined: {}", profile_id);
-            finish_init(app_state, &mut profiles, &profile_id, msg.extension_id);
+            finish_init(app_state, &mut profiles, &profile_id, msg.extension_id, msg.extension_version);
             return NativeResponse::success(NativeResponseData::Initialized { cached: false })
         }
     }
@@ -45,9 +46,16 @@ pub fn process_cmd_initialize(app_state: &mut AppState,
     return NativeResponse::error("Unable to detect current profile.")
 }
 
-fn finish_init(app_state: &mut AppState, profiles: &mut ProfilesIniState, profile_id: &str, internal_ext_id: String) {
+fn finish_init(
+    app_state: &mut AppState,
+    profiles: &mut ProfilesIniState,
+    profile_id: &str,
+    internal_ext_id: String,
+    ext_version: Option<String>,
+) {
     app_state.cur_profile_id = Some(profile_id.to_owned());
     app_state.internal_extension_id = Some(internal_ext_id);
+    app_state.extension_version = ext_version.and_then(|v| Version::parse(&v).ok());
 
     if app_state.first_run {
         app_state.first_run = false;

@@ -1,9 +1,10 @@
-use crate::profiles::{ProfilesIniState, write_profiles};
+use crate::profiles::{check_profile_active, ProfilesIniState, write_profiles};
 use crate::native_req::NativeMessageDeleteProfile;
 use crate::native_resp::{NativeResponse, NativeResponseData};
 use crate::ipc::notify_profile_changed;
 use std::fs;
 use crate::AppContext;
+use crate::profiles_order::OrderData;
 
 pub fn process_cmd_delete_profile(context: &AppContext, mut profiles: ProfilesIniState, msg: NativeMessageDeleteProfile) -> NativeResponse {
     let profile_index = match profiles.profile_entries.iter().position(|p| p.id == msg.profile_id) {
@@ -17,11 +18,7 @@ pub fn process_cmd_delete_profile(context: &AppContext, mut profiles: ProfilesIn
     let profile_path = profile.full_path(&context.state.config);
 
     // Check that profile is closed
-    if [
-        profile_path.join("cookies.sqlite-wal"),
-        profile_path.join("webappsstore.sqlite-wal"),
-        profile_path.join("places.sqlite-wal")
-    ].iter().any(|file| file.exists()) {
+    if check_profile_active(&profile_path) {
         return NativeResponse::error(
             concat!(
             "This profile is in use and therefore cannot be deleted, close the profile and try again.\n\n",
@@ -40,6 +37,9 @@ pub fn process_cmd_delete_profile(context: &AppContext, mut profiles: ProfilesIn
             new_def_profile.default = true
         }
     }
+
+    // Re-calculate profile order
+    OrderData::try_rewrite(context, &profiles);
 
     // Write new profile list
     if let Err(e) = write_profiles(&context.state.config, &context.state.config_dir, &profiles) {

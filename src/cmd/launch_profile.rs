@@ -6,7 +6,7 @@ use crate::ipc::notify_focus_window;
 use crate::process::{fork_browser_proc, ForkBrowserProcError};
 
 pub fn process_cmd_launch_profile(context: &AppContext,
-                              profiles: &ProfilesIniState,
+                              profiles: ProfilesIniState,
                               msg: NativeMessageLaunchProfile) -> NativeResponse {
     // Match ID with profile
     let profile = match profiles.profile_entries.iter().find(|p| p.id == msg.profile_id) {

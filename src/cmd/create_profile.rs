@@ -11,6 +11,7 @@ use crate::ipc::notify_profile_changed;
 use serde::Serialize;
 use std::ops::Add;
 use crate::AppContext;
+use crate::profiles_order::OrderData;
 
 fn find_extension_chunk<'a>(app_state: &AppState, json: &'a Value) -> Option<&'a serde_json::Map<String, Value>> {
     if let Some(our_extension_id) = &app_state.extension_id {
@@ -173,6 +174,8 @@ pub fn process_cmd_create_profile(
         options: new_profile.options.clone()
     };
     profiles.profile_entries.push(new_profile);
+    // Re-calculate profile order
+    OrderData::try_rewrite(context, &profiles);
 
     if let Err(e) = write_profiles(&context.state.config, &context.state.config_dir, &profiles) {
         return NativeResponse::error_with_dbg_msg("Failed to save new changes!", e);

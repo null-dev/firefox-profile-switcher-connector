@@ -7,7 +7,7 @@ use crate::options::{read_global_options, write_global_options};
 use crate::ipc::notify_options_changed;
 
 pub fn process_cmd_update_options(context: &AppContext,
-                              profiles: &ProfilesIniState,
+                              profiles: ProfilesIniState,
                               msg: NativeMessageUpdateOptions) -> NativeResponse {
     let options_data_path = global_options_data_path(&context.state.config_dir);
     let mut options = read_global_options(&options_data_path);
@@ -19,7 +19,7 @@ pub fn process_cmd_update_options(context: &AppContext,
     if let Err(e) = write_global_options(&options_data_path, &options) {
         return NativeResponse::error_with_dbg_msg("Failed to save new changes!", e);
     }
-    notify_options_changed(context, profiles);
+    notify_options_changed(context, &profiles);
 
     return NativeResponse::success(NativeResponseData::OptionsUpdated { options })
 }

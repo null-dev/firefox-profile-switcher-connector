@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use serde_json::Value;
 use std::io::Read;
 use byteorder::{ReadBytesExt, NativeEndian};
+use eyre::Context;
 use serde::{Deserialize, Serialize};
-use anyhow::{Context, Result};
 
 // === NATIVE REQUEST ===
 #[derive(Serialize, Deserialize, Debug)]
 pub struct NativeMessageInitialize {
     pub extension_id: String,
+    pub extension_version: Option<String>,
     pub profile_id: Option<String>
 }
 
@@ -55,6 +56,11 @@ pub struct NativeMessageDeleteAvatar {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct NativeMessageUpdateProfileOrder {
+    pub order: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "command")]
 pub enum NativeMessage {
     Initialize(NativeMessageInitialize),
@@ -66,7 +72,8 @@ pub enum NativeMessage {
     CloseManager,
     AddAvatars,
     GetAvatar(NativeMessageGetAvatar),
-    DeleteAvatar(NativeMessageDeleteAvatar)
+    DeleteAvatar(NativeMessageDeleteAvatar),
+    UpdateProfileOrder(NativeMessageUpdateProfileOrder),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -74,15 +81,15 @@ pub struct NativeMessageWrapper {
     pub id: i64,
     pub msg: NativeMessage
 }
-pub fn read_incoming_message(input: &mut impl Read) -> Result<NativeMessageWrapper> {
+pub fn read_incoming_message(input: &mut impl Read) -> eyre::Result<NativeMessageWrapper> {
     // Read size of incoming message
     let size = input.read_u32::<NativeEndian>()
-        .expect("Failed to read native message size!");
+        .context("Failed to read native message size!")?;
 
     // Read and deserialize
     let mut conf_buffer = vec![0u8; size as usize];
     input.read_exact(&mut conf_buffer)
-        .expect("Failed to read native message!");
+        .context("Failed to read native message!")?;
     serde_json::from_slice(&conf_buffer)
         .context("Failed to deserialize native message!")
 }

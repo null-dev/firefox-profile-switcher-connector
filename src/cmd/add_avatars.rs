@@ -7,7 +7,7 @@ use crate::native_resp::NativeResponseData::AvatarsUpdated;
 use crate::profiles::ProfilesIniState;
 use crate::storage::{custom_avatars_path};
 
-pub fn process_add_avatars(context: &AppContext, profiles: &ProfilesIniState) -> NativeResponse {
+pub fn process_cmd_add_avatars(context: &AppContext, profiles: ProfilesIniState) -> NativeResponse {
     // Pick avatar
     let result = match context.windowing.open_avatar_picker() {
         Some(r) => r,
@@ -49,7 +49,7 @@ pub fn process_add_avatars(context: &AppContext, profiles: &ProfilesIniState) ->
         }
     }
 
-    notify_update_avatars(context, profiles);
+    notify_update_avatars(context, &profiles);
 
     NativeResponse::success(AvatarsUpdated)
 }
