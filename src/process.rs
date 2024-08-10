@@ -1,8 +1,10 @@
+
 use std::{io, env};
 use std::env::VarError;
+use std::path::{PathBuf};
+use std::process::{Child, Command, Stdio};
+use sysinfo::{get_current_pid, ProcessRefreshKind, RefreshKind, System};
 use cfg_if::cfg_if;
-use std::path::PathBuf;
-use std::process::{exit, Child, Command, Stdio};
 use once_cell::sync::Lazy;
 use crate::state::AppState;
 use crate::profiles::ProfileEntry;
@@ -15,7 +17,6 @@ cfg_if! {
         use windows::Win32::System::Threading as win_threading;
         use windows::Win32::UI::Shell::{ApplicationActivationManager, IApplicationActivationManager, AO_NONE};
         use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
-        use windows::Win32::Foundation::PWSTR;
         use std::os::windows::process::CommandExt;
         use crate::config::get_msix_package;
     } else {
@@ -166,14 +167,75 @@ pub enum GetParentProcError {
     LinuxOpenCurProcFailed(io::Error),
     LinuxFailedToParsePidString(String),
     LinuxCouldNotFindPPid,
-    LinuxResolveParentExeFailed(io::Error)
+    LinuxResolveParentExeFailed(io::Error),
+    CouldNotResolveExePath,
 }
 
 static PARENT_PROC: Lazy<Result<PathBuf, GetParentProcError>> = Lazy::new(|| {
-    // Get browser binary by reading crash-reporter env var
-    env::var("MOZ_CRASHREPORTER_RESTART_ARG_0")
-        .map(PathBuf::from)
-        .map_err(GetParentProcError::NoCrashReporterEnvVar)
+    let crash_restart_arg = env::var("MOZ_CRASHREPORTER_RESTART_ARG_0");
+    if crash_restart_arg.is_ok()
+    {
+        let crash_restart_bin_path = PathBuf::from(crash_restart_arg.unwrap());
+        if crash_restart_bin_path.try_exists().is_ok_and(|exists| exists == true)
+        {
+            return Ok(crash_restart_bin_path);
+        }
+    }
+
+    // Running version of Firefox where "MOZ_CRASHREPORTER_RESTART_ARG_0" is removed, try getting parent process and its path directly
+    let myproc_id = get_current_pid();
+    if myproc_id.is_ok()
+    {
+        let sys = System::new_with_specifics(
+            RefreshKind::new().with_processes(ProcessRefreshKind::new().with_exe(sysinfo::UpdateKind::OnlyIfNotSet))
+       );
+        let myproc = sys.process(myproc_id.unwrap());
+        
+        let parent_id = myproc.unwrap().parent();
+        if !parent_id.is_none()
+        {
+            let parentproc = sys.process(parent_id.unwrap());
+            if !parentproc.is_none()
+            {
+                let proc_path = parentproc.unwrap().exe();
+                if !proc_path.is_none()
+                {
+                    let bin_path = PathBuf::from(proc_path.unwrap());
+                    let bin_exist = bin_path.try_exists();
+
+                    if bin_exist.is_ok_and(|exists| exists == true)
+                    {
+                        return Ok(bin_path);
+                    }
+                }
+            }
+        }
+    }
+    // TODO: Add conditions to handle other systems than Windows
+
+    //Failed using most reliable methods, so find the correct path using this other relative path var. Hopefully this one doesn't get removed too...
+    // MOZ_CRASHREPORTER_STRINGS_OVERRIDE points to parent Firefox process's install-root-folder\browser\crashreporter-override.ini
+    // So traverse up to get the location of the parent firefox.exe's path.
+    // Won't work reliably for other forks that don't use firefox.exe as the name, or other operating systems until conditions added
+    let crash_override_env_var = env::var("MOZ_CRASHREPORTER_STRINGS_OVERRIDE");
+   
+    if crash_override_env_var.is_ok()
+    {
+        let crash_override_path = PathBuf::from(crash_override_env_var.unwrap().replace("\\", "/")); //PathBuf parent() hopping seems to break with backwards slash paths...
+        let firefox_browser_dir = crash_override_path.ancestors().find(|parent| parent.ends_with("browser") );
+        if !firefox_browser_dir.is_none()
+        {
+            //Go up one more directory, as it should be Firefox root if we were at /browser/ path.
+            let firefox_bin_path = PathBuf::from(firefox_browser_dir.unwrap().parent().unwrap().display().to_string() + "/firefox.exe");
+            let ff_bin_exists = firefox_bin_path.try_exists();
+            if ff_bin_exists.is_ok_and(|exists| exists == true)
+            {
+                return Ok(firefox_bin_path);
+            }
+        }
+    }
+
+    return Err(GetParentProcError::CouldNotResolveExePath);
 });
 
 pub fn get_parent_proc_path() -> Result<&'static PathBuf, &'static GetParentProcError> {

@@ -1,6 +1,8 @@
 // === CONFIG ===
 
-use std::path::{PathBuf};
+use std::path::PathBuf;
+use std::path::Component;
+use crate::process::get_parent_proc_path;
 use serde::{Deserialize, Serialize};
 use cfg_if::cfg_if;
 use std::fs::OpenOptions;
